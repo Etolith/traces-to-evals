@@ -9,10 +9,12 @@ use anyhow::Result;
 use types::JudgeResult;
 
 #[cfg(feature = "llm-judge-openai")]
+use crate::evaluation::AsyncEvaluator;
+#[cfg(feature = "llm-judge-openai")]
 use crate::model::EvalCase;
 
 #[cfg(feature = "llm-judge-openai")]
 #[async_trait::async_trait]
-pub trait LlmJudge {
+pub trait LlmJudge: AsyncEvaluator {
     async fn judge_case(&self, case: &EvalCase) -> Result<JudgeResult>;
 }

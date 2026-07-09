@@ -1,12 +1,16 @@
 # traces-to-evals
 
-`traces-to-evals` turns GenAI execution traces into reusable evaluation cases, then grades or exports those cases.
+`traces-to-evals` turns GenAI execution traces into reusable evaluation cases, then evaluates, calibrates, aggregates, or exports those cases.
 
-The crate is organized around four jobs:
+The crate is organized around a composable evaluation pipeline:
 
 - model traces as `Trace`, `Span`, and `EvalCase`
 - extract eval cases with explicit extractor types
-- grade cases with deterministic graders or an optional OpenAI judge
+- evaluate cases with deterministic graders or an optional OpenAI judge
+- normalize all evaluator output into `EvaluationResult`
+- collect cases and results in `EvaluationRun`
+- calibrate historical evaluator scores with `CalibrationModel`
+- aggregate run quality with `WeightedAggregate`
 - export cases/results as JSONL, CSV, OpenAI eval rows, or promptfoo tests
 
 ## Current Capabilities
@@ -29,13 +33,19 @@ The crate is organized around four jobs:
 - `ContainsGrader`
 - optional `OpenAiJudge` behind `--features llm-judge-openai`
 
+Deterministic graders implement `Evaluator`. LLM judges implement `AsyncEvaluator`. Both produce the same `EvaluationResult` shape.
+
 The OpenAI judge asks only for subjective judgment fields (`score`, `criteria`, `evaluation`) using strict structured outputs. Pass/fail is computed locally from the score threshold.
 
-**Calibration and scoring**
+**Evaluation, calibration, and scoring**
 
+- `EvaluationResult` is the canonical output for deterministic graders, LLM judges, and future ML scorers.
+- `EvaluationRun` composes cases, multiple evaluator passes, and aggregate scoring.
+- `WeightedAggregate` computes weighted run scores by evaluator and cluster.
 - `HumanRating` captures historical human labels.
-- `calibrate_judge_results()` compares judge output against human ratings.
-- `ScoredResult` normalizes deterministic and judge scores into a common shape.
+- `CalibrationModel::fit()` learns score bins from previous `EvaluationResult` datasets and human ratings.
+- `calibrate_judge_results()` remains as a compatibility helper for raw `JudgeResult` values.
+- `ScoredResult` remains as a compatibility alias for `EvaluationResult`.
 
 **Export and I/O**
 
@@ -52,13 +62,13 @@ Run tests:
 cargo test
 ```
 
-Grade eval cases deterministically:
+Evaluate cases deterministically:
 
 ```bash
 cargo run --bin traceeval -- grade \
   --cases eval_cases.jsonl \
   --grader exact-match \
-  --out grade_results.jsonl
+  --out evaluation_results.jsonl
 ```
 
 Other deterministic graders:
@@ -67,13 +77,13 @@ Other deterministic graders:
 cargo run --bin traceeval -- grade \
   --cases eval_cases.jsonl \
   --grader non-empty-output \
-  --out grade_results.jsonl
+  --out evaluation_results.jsonl
 
 cargo run --bin traceeval -- grade \
   --cases eval_cases.jsonl \
   --grader contains \
   --contains "expected phrase" \
-  --out grade_results.jsonl
+  --out evaluation_results.jsonl
 ```
 
 Use the OpenAI judge:
@@ -83,7 +93,7 @@ cargo run --features llm-judge-openai --bin traceeval -- grade \
   --cases eval_cases.jsonl \
   --judge openai-dive \
   --model gpt-4o \
-  --out judge_results.jsonl
+  --out evaluation_results.jsonl
 ```
 
 Compatibility command:
@@ -93,7 +103,7 @@ cargo run --features llm-judge-openai --bin traceeval -- judge \
   --cases eval_cases.jsonl \
   --provider openai-dive \
   --model gpt-4o \
-  --out judge_results.jsonl
+  --out evaluation_results.jsonl
 ```
 
 The OpenAI path reads credentials from the environment, so set `OPENAI_API_KEY` before running it.
@@ -101,21 +111,81 @@ The OpenAI path reads credentials from the environment, so set `OPENAI_API_KEY` 
 ## Library Example
 
 ```rust
-use traces_to_evals::extractors::SimpleExtractor;
-use traces_to_evals::graders::{DeterministicGrader, ExactMatchGrader};
+use traces_to_evals::prelude::*;
 use traces_to_evals::io::jsonl::JsonlFile;
-use traces_to_evals::{Span, Trace};
 
 # fn main() -> anyhow::Result<()> {
-let trace = Trace::new("trace-1")
-    .with_span(Span::llm("input", "prompt").with_input("What is 2 + 2?"))
-    .with_span(Span::llm("output", "completion").with_output("4"));
+let cases = vec![
+    EvalCase::new("case-1", "trace-1", "What is 2 + 2?")
+        .with_actual_output("4")
+        .with_expected_output("4"),
+];
 
-let mut case = SimpleExtractor.extract_trace(&trace)?;
-case.expected_output = Some("4".to_string());
+let run = EvaluationRun::new(cases)
+    .evaluate_with(&NonEmptyOutputGrader)?
+    .evaluate_with(&ExactMatchGrader)?;
 
-let result = ExactMatchGrader.grade(&case)?;
-JsonlFile::new("grade_results.jsonl").write_all(&[result])?;
+let score = run.aggregate();
+assert_eq!(score.weighted_score, 1.0);
+
+JsonlFile::new("evaluation_results.jsonl").write_all(run.results())?;
+# Ok(())
+# }
+```
+
+Async judges compose through the same run type:
+
+```rust
+# #[cfg(feature = "llm-judge-openai")]
+# async fn example() -> anyhow::Result<()> {
+use traces_to_evals::prelude::*;
+use traces_to_evals::judge::openai::OpenAiJudge;
+
+let cases = vec![
+    EvalCase::new("case-1", "trace-1", "Summarize the trace")
+        .with_actual_output("The agent retrieved context and answered.")
+        .with_rubric("Reward concise, faithful summaries."),
+];
+
+let judge = OpenAiJudge::from_env("gpt-4o");
+let run = EvaluationRun::new(cases)
+    .evaluate_with_async(&judge)
+    .await?;
+# Ok(())
+# }
+```
+
+Calibration composes with the same result type:
+
+```rust
+use traces_to_evals::calibration::{CalibrationModel, HumanRating};
+use traces_to_evals::prelude::*;
+
+# fn main() -> anyhow::Result<()> {
+let historical_results = vec![
+    EvaluationResult::from_ids(
+        "case-1",
+        "trace-1",
+        "openai/gpt-4o",
+        3.0,
+        ScoreScale::FourPoint,
+        true,
+        "mostly correct",
+    ),
+];
+let new_run = EvaluationRun::new(Vec::new()).add_results(historical_results.clone());
+let human_ratings = vec![
+    HumanRating {
+        case_id: "case-1".to_string(),
+        trace_id: "trace-1".to_string(),
+        score: 4,
+        passed: None,
+        notes: None,
+    },
+];
+
+let model = CalibrationModel::fit(&human_ratings, &historical_results, 3)?;
+let calibrated_run = model.apply_run(new_run);
 # Ok(())
 # }
 ```
@@ -126,7 +196,11 @@ Prefer the struct-based APIs:
 
 ```rust
 JsonlFile::new(path).read_all::<EvalCase>()?;
-JsonlFile::new(path).write_all(&results)?;
+JsonlFile::new(path).write_all(run.results())?;
+
+EvaluationRun::new(cases)
+    .evaluate_with(&ExactMatchGrader)?
+    .aggregate_with(&WeightedAggregate::default());
 
 OpenAiEvalExporter::write_jsonl(path, &cases)?;
 PromptfooExporter::write_json(path, &cases)?;
@@ -137,11 +211,11 @@ EvalCaseCsvExporter::write(path, &cases)?;
 
 ## Planned Work
 
-See [docs/scoring-design.md](docs/scoring-design.md) for the planned calibrated scoring, cluster-aware scoring, weighted aggregate reports, and optional ML/library stack.
+See [docs/missing.md](docs/missing.md) for the implementation checklist and [docs/scoring-design.md](docs/scoring-design.md) for the scoring, calibration, clustering, and optional ML design.
 
 Near-term implementation priorities:
 
 - add an OpenInference import command
 - add validation/report commands
-- add calibration model output, not only calibration summary metrics
+- add calibration model CLI output
 - add weighted aggregate run reports

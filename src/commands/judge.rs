@@ -8,6 +8,7 @@ use crate::cli::JudgeProviderName;
 
 #[cfg(feature = "llm-judge-openai")]
 pub async fn run(args: JudgeArgs) -> Result<()> {
+    use crate::evaluation::EvaluationRun;
     use crate::io::jsonl::JsonlFile;
     use crate::judge::openai::OpenAiJudge;
     use crate::model::EvalCase;
@@ -16,13 +17,11 @@ pub async fn run(args: JudgeArgs) -> Result<()> {
         JudgeProviderName::OpenaiDive => {
             let cases: Vec<EvalCase> = JsonlFile::new(&args.cases).read_all()?;
             let judge = OpenAiJudge::from_env(args.model);
-            let mut results = Vec::with_capacity(cases.len());
+            let run = EvaluationRun::new(cases)
+                .evaluate_with_async(&judge)
+                .await?;
 
-            for case in cases {
-                results.push(judge.judge_case(&case).await?);
-            }
-
-            JsonlFile::new(&args.out).write_all(&results)
+            JsonlFile::new(&args.out).write_all(run.results())
         }
     }
 }

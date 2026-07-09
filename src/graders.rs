@@ -1,6 +1,7 @@
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 
+use crate::evaluation::{EvaluationResult, Evaluator, ScoreScale};
 use crate::model::EvalCase;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -45,9 +46,37 @@ impl GradeResult {
     }
 }
 
+impl From<GradeResult> for EvaluationResult {
+    fn from(result: GradeResult) -> Self {
+        EvaluationResult::from_ids(
+            result.case_id,
+            result.trace_id,
+            result.grader_name,
+            f32::from(result.score),
+            ScoreScale::Binary,
+            result.passed,
+            result.evaluation,
+        )
+        .with_confidence(1.0)
+    }
+}
+
 pub trait DeterministicGrader {
     fn name(&self) -> &'static str;
     fn grade(&self, case: &EvalCase) -> Result<GradeResult>;
+}
+
+impl<T> Evaluator for T
+where
+    T: DeterministicGrader,
+{
+    fn evaluator_name(&self) -> String {
+        self.name().to_string()
+    }
+
+    fn evaluate_case(&self, case: &EvalCase) -> Result<EvaluationResult> {
+        Ok(self.grade(case)?.into())
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -161,6 +190,13 @@ pub fn grade_cases<G: DeterministicGrader>(
     cases.iter().map(|case| grader.grade(case)).collect()
 }
 
+pub fn evaluate_cases<G: Evaluator>(
+    evaluator: &G,
+    cases: &[EvalCase],
+) -> Result<Vec<EvaluationResult>> {
+    evaluator.evaluate_cases(cases)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -175,6 +211,10 @@ mod tests {
 
         assert!(result.passed);
         assert_eq!(result.score, 1);
+
+        let evaluated = ExactMatchGrader.evaluate_case(&case).unwrap();
+        assert_eq!(evaluated.evaluator_name, "exact_match");
+        assert_eq!(evaluated.normalized_score, 1.0);
     }
 
     #[test]

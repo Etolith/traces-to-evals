@@ -13,11 +13,11 @@ path = "src/bin/traceeval.rs"
 
 [features]
 default = []
-llm-judge-openai = ["openai_dive", "async-trait", "schemars", "tokio"]
+llm-judge-openai = ["openai_dive", "schemars", "tokio"]
 
 [dependencies]
 anyhow = "1"
-async-trait = { version = "0.1", optional = true }
+async-trait = "0.1"
 clap = { version = "4", features = ["derive"] }
 csv = "1"
 openai_dive = { version = "1.4", optional = true }

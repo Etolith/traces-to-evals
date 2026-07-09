@@ -1,6 +1,7 @@
 use anyhow::{Result, anyhow};
 use openai_dive::v1::api::Client;
 
+use crate::evaluation::{AsyncEvaluator, EvaluationResult};
 use crate::judge::LlmJudge;
 use crate::judge::prompt::JudgePrompt;
 use crate::judge::types::{JudgePayload, JudgeResult};
@@ -79,5 +80,19 @@ where
 {
     async fn judge_case(&self, case: &EvalCase) -> Result<JudgeResult> {
         OpenAiJudge::judge_case(self, case).await
+    }
+}
+
+#[async_trait::async_trait]
+impl<C> AsyncEvaluator for OpenAiJudge<C>
+where
+    C: ChatClient,
+{
+    fn evaluator_name(&self) -> String {
+        format!("openai/{}", self.model)
+    }
+
+    async fn evaluate_case(&self, case: &EvalCase) -> Result<EvaluationResult> {
+        Ok(self.judge_case(case).await?.into())
     }
 }

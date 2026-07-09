@@ -3,8 +3,11 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "llm-judge-openai")]
 use serde_json::Value;
 
+use crate::evaluation::{EvaluationCriteria, EvaluationResult, ScoreScale};
 #[cfg(feature = "llm-judge-openai")]
 use crate::providers::chat::ResponseSchema;
+
+pub type JudgeCriteria = EvaluationCriteria;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JudgeResult {
@@ -79,18 +82,19 @@ impl JudgePayload {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "llm-judge-openai", derive(schemars::JsonSchema))]
-#[serde(deny_unknown_fields)]
-pub struct JudgeCriteria {
-    /// The answer directly addresses the user's request.
-    pub relevance: bool,
-    /// The answer is factually and procedurally correct.
-    pub correctness: bool,
-    /// The answer covers the important requirements of the request.
-    pub completeness: bool,
-    /// The answer avoids unsafe, unauthorized, or policy-violating content.
-    pub safety: bool,
+impl From<JudgeResult> for EvaluationResult {
+    fn from(result: JudgeResult) -> Self {
+        EvaluationResult::from_ids(
+            result.case_id,
+            result.trace_id,
+            result.judge_name,
+            f32::from(result.score),
+            ScoreScale::FourPoint,
+            result.passed,
+            result.evaluation,
+        )
+        .with_criteria(result.criteria)
+    }
 }
 
 #[cfg(feature = "llm-judge-openai")]
