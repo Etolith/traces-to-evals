@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 
 use crate::commands;
 
@@ -72,6 +72,15 @@ pub struct ValidateArgs {
     /// Input evaluation results JSONL file.
     #[arg(long)]
     pub results: Option<PathBuf>,
+    /// Input case embeddings JSONL file.
+    #[arg(long)]
+    pub embeddings: Option<PathBuf>,
+    /// Input cluster model JSON file.
+    #[arg(long = "cluster-model")]
+    pub cluster_model: Option<PathBuf>,
+    /// Input cluster assignments JSONL file.
+    #[arg(long)]
+    pub assignments: Option<PathBuf>,
     /// Validation profile to apply.
     #[arg(long, value_enum)]
     pub profile: Option<ValidationProfileName>,
@@ -98,12 +107,44 @@ pub struct CalibrateArgs {
 
 #[derive(Debug, Clone, Args)]
 pub struct ClusterArgs {
+    #[command(subcommand)]
+    pub command: ClusterCommand,
+}
+
+#[derive(Debug, Clone, Subcommand)]
+pub enum ClusterCommand {
+    /// Generate case embeddings for cluster discovery.
+    Embed(ClusterEmbedArgs),
+    /// Discover clusters from historical cases and embeddings.
+    Discover(ClusterDiscoverArgs),
+    /// Label a discovered cluster model.
+    Label(ClusterLabelArgs),
+    /// Assign cases to known clusters or a discovered cluster model.
+    Assign(ClusterAssignArgs),
+}
+
+#[derive(Debug, Clone, Args)]
+#[command(group(
+    ArgGroup::new("cluster_source")
+        .required(true)
+        .args(["clusters", "model"])
+))]
+pub struct ClusterAssignArgs {
     /// Input eval cases JSONL file.
     #[arg(long)]
     pub cases: PathBuf,
     /// Cluster definitions JSONL file.
-    #[arg(long)]
-    pub clusters: PathBuf,
+    #[arg(long, conflicts_with = "model")]
+    pub clusters: Option<PathBuf>,
+    /// Discovered cluster model JSON file.
+    #[arg(long, conflicts_with = "clusters", requires = "embeddings")]
+    pub model: Option<PathBuf>,
+    /// Case embeddings JSONL file for discovered-model assignment.
+    #[arg(long, requires = "model")]
+    pub embeddings: Option<PathBuf>,
+    /// Distance threshold above which model assignment marks novelty.
+    #[arg(long = "novelty-distance-threshold", requires = "model")]
+    pub novelty_distance_threshold: Option<f32>,
     /// Output cluster assignments JSONL file.
     #[arg(long)]
     pub out: PathBuf,
@@ -113,6 +154,72 @@ pub struct ClusterArgs {
     /// Optional output path for annotated evaluation results.
     #[arg(long = "results-out", requires = "results")]
     pub results_out: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct ClusterEmbedArgs {
+    /// Input eval cases JSONL file.
+    #[arg(long)]
+    pub cases: PathBuf,
+    /// Embedding provider to run.
+    #[arg(long, value_enum)]
+    pub provider: ClusterEmbeddingProviderName,
+    /// Embedding model name.
+    #[arg(long)]
+    pub model: String,
+    /// Output case embeddings JSONL file.
+    #[arg(long)]
+    pub out: PathBuf,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct ClusterDiscoverArgs {
+    /// Input historical eval cases JSONL file.
+    #[arg(long)]
+    pub cases: PathBuf,
+    /// Input case embeddings JSONL file.
+    #[arg(long)]
+    pub embeddings: PathBuf,
+    /// Discovery algorithm.
+    #[arg(long, value_enum)]
+    pub algorithm: ClusterAlgorithmName,
+    /// Number of clusters for k-means.
+    #[arg(long)]
+    pub k: Option<usize>,
+    /// Representative examples per discovered cluster.
+    #[arg(long, default_value_t = 5)]
+    pub representatives: usize,
+    /// Output discovered cluster model JSON file.
+    #[arg(long = "out-model")]
+    pub out_model: PathBuf,
+    /// Output cluster assignments JSONL file.
+    #[arg(long = "out-assignments")]
+    pub out_assignments: PathBuf,
+    /// Output report-compatible cluster definitions JSONL file.
+    #[arg(long = "out-clusters")]
+    pub out_clusters: PathBuf,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct ClusterLabelArgs {
+    /// Input discovered cluster model JSON file.
+    #[arg(long)]
+    pub model: PathBuf,
+    /// Input historical eval cases JSONL file.
+    #[arg(long)]
+    pub cases: PathBuf,
+    /// Label provider to run.
+    #[arg(long, value_enum)]
+    pub provider: ClusterLabelProviderName,
+    /// LLM model name.
+    #[arg(long = "llm-model")]
+    pub llm_model: String,
+    /// Output labeled cluster model JSON file.
+    #[arg(long = "out-model")]
+    pub out_model: PathBuf,
+    /// Output report-compatible labeled cluster definitions JSONL file.
+    #[arg(long = "out-clusters")]
+    pub out_clusters: PathBuf,
 }
 
 #[derive(Debug, Clone, Args)]
@@ -144,6 +251,9 @@ pub enum ValidationProfileName {
     RunnableCases,
     EvaluationResults,
     CalibrationDataset,
+    EmbeddingDataset,
+    ClusterModel,
+    ClusterAssignments,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -156,6 +266,22 @@ pub enum DeterministicGraderName {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum JudgeProviderName {
     OpenaiDive,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ClusterEmbeddingProviderName {
+    Openai,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ClusterLabelProviderName {
+    Openai,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ClusterAlgorithmName {
+    Kmeans,
+    Dbscan,
 }
 
 #[cfg(feature = "llm-judge-openai")]
@@ -225,6 +351,50 @@ mod tests {
             "gpt-4o",
             "--out",
             "out.jsonl",
+        ]);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parses_cluster_assign_with_model_source() {
+        let cli = Cli::parse_from([
+            "traceeval",
+            "cluster",
+            "assign",
+            "--cases",
+            "cases.jsonl",
+            "--model",
+            "cluster_model.json",
+            "--embeddings",
+            "embeddings.jsonl",
+            "--out",
+            "assignments.jsonl",
+        ]);
+
+        let Command::Cluster(cluster_args) = cli.command else {
+            panic!("expected cluster command");
+        };
+        let ClusterCommand::Assign(args) = cluster_args.command else {
+            panic!("expected cluster assign command");
+        };
+
+        assert_eq!(args.cases, PathBuf::from("cases.jsonl"));
+        assert_eq!(args.model, Some(PathBuf::from("cluster_model.json")));
+        assert_eq!(args.embeddings, Some(PathBuf::from("embeddings.jsonl")));
+        assert_eq!(args.out, PathBuf::from("assignments.jsonl"));
+    }
+
+    #[test]
+    fn rejects_cluster_assign_without_source() {
+        let result = Cli::try_parse_from([
+            "traceeval",
+            "cluster",
+            "assign",
+            "--cases",
+            "cases.jsonl",
+            "--out",
+            "assignments.jsonl",
         ]);
 
         assert!(result.is_err());

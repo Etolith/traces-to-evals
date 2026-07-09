@@ -259,69 +259,22 @@ Acceptance criteria:
 
 ## 5. Real Cluster Discovery And LLM Labeling
 
+Authoritative spec: [cluster-discovery.md](cluster-discovery.md).
+
 Current issue:
 
 - Current clustering support is rule-based assignment into known clusters.
-- It does not discover new clusters.
-- LLM-based cluster naming is documented but not implemented.
+- It now has default-build cluster discovery schemas, projection, validation, and nearest-centroid assignment from a manually constructed `ClusterModel`.
+- It still does not fit/discover new clusters from embeddings.
+- LLM-based cluster naming is specified but not implemented.
 
-The intended architecture should stay split:
-
-```text
-ClusterDiscovery -> creates groups
-ClusterLabeler   -> names/explains groups, often with an LLM
-ClusterAssigner  -> maps new cases to known/discovered clusters
-```
-
-Future API:
-
-```rust
-#[async_trait::async_trait]
-pub trait ClusterDiscovery {
-    async fn fit(&self, cases: &[EvalCase]) -> Result<ClusterModel>;
-}
-
-pub struct ClusterModel {
-    pub clusters: Vec<DiscoveredCluster>,
-    pub assignments: Vec<ClusterAssignment>,
-}
-
-pub struct DiscoveredCluster {
-    pub id: String,
-    pub representative_case_ids: Vec<String>,
-    pub size: usize,
-    pub centroid: Option<Vec<f32>>,
-    pub label: Option<ClusterLabel>,
-}
-
-#[async_trait::async_trait]
-pub trait ClusterLabeler {
-    async fn label_cluster(
-        &self,
-        cluster: &DiscoveredCluster,
-        examples: &[EvalCase],
-    ) -> Result<ClusterLabel>;
-}
-
-pub struct ClusterLabel {
-    pub label: String,
-    pub description: String,
-    pub suggested_rubric: Option<String>,
-    pub known_failure_modes: Vec<String>,
-}
-```
-
-Recommended flow:
+The specified architecture stays split:
 
 ```text
-historical EvalCase rows
-  -> text projection
-  -> embeddings
-  -> clustering algorithm
-  -> representative examples per cluster
-  -> LLM cluster label/description/rubric/failure modes
-  -> optional human approval
-  -> cluster-aware reporting/calibration
+EmbeddingProvider -> creates CaseEmbedding rows
+ClusterDiscovery  -> creates a ClusterModel from cases and embeddings
+ClusterLabeler    -> names/explains discovered clusters, often with an LLM
+ClusterAssigner   -> maps new cases to known or discovered clusters
 ```
 
 Policy:
@@ -330,15 +283,25 @@ Policy:
 - Use LLMs to label, explain, summarize, and inspect discovered clusters.
 - Keep embeddings and ML dependencies feature-gated.
 - Keep the default crate capable of rule-based assignment without ML.
+- Persist versioned schemas for embeddings, cluster models, and assignments.
 
 Recommended feature flags:
 
 ```toml
-embeddings-openai = ["openai_dive"]
+embeddings-openai = ["openai_dive", "tokio"]
 embeddings-local = ["fastembed"]
 clustering-linfa = ["linfa", "linfa-clustering", "ndarray"]
-cluster-label-openai = ["openai_dive", "tokio"]
+cluster-label-openai = ["openai_dive", "schemars", "tokio"]
 ```
+
+Implementation contract:
+
+- Add `CaseEmbedding`, `ClusterModel`, `DiscoveredCluster`, `ClusterLabel`, and quality types. Done.
+- Add validation profiles for embedding datasets, cluster models, and cluster assignments. Done for library and `traceeval validate` inputs.
+- Add `ClusterTextProjector`, `EmbeddingProvider`, `ClusterDiscovery`, `ClusterLabeler`, and embedding-aware assignment APIs. Done for traits and nearest-centroid assignment; provider implementations do not exist yet.
+- Add CLI subcommands: `cluster embed`, `cluster discover`, `cluster label`, and expanded `cluster assign`. Done for the command contracts; only `cluster assign` has a functional backend today.
+- Add K-Means with `linfa-clustering` first; DBSCAN/HDBSCAN-style work is later.
+- Add OpenAI embeddings and OpenAI cluster labeling only behind feature flags.
 
 Acceptance criteria:
 
@@ -346,6 +309,7 @@ Acceptance criteria:
 - Users can label clusters with an LLM.
 - Users can review/edit labels before using them for reports.
 - New cases can be assigned to discovered clusters without rerunning discovery.
+- Default builds do not include ML, embedding, ANN, or vector database dependencies.
 
 ## Recommended Order
 

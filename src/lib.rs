@@ -18,9 +18,13 @@ pub mod report;
 pub mod validation;
 
 pub use clustering::{
-    ClusterAssigner, ClusterAssignment, ClusterAssignmentRule, ClusterRuleMatch, EvalCluster,
-    FnClusterAssignmentRule, KeywordAssignmentRule, MetadataAssignmentRule,
-    RuleBasedClusterAssigner,
+    CaseEmbedding, ClusterAlgorithm, ClusterAssigner, ClusterAssignment, ClusterAssignmentRule,
+    ClusterDiscovery, ClusterDiscoveryInput, ClusterDiscoveryOptions, ClusterLabel, ClusterLabeler,
+    ClusterModel, ClusterModelAssigner, ClusterModelSource, ClusterQuality, ClusterQualityReport,
+    ClusterRuleMatch, ClusterText, ClusterTextProjector, DefaultClusterTextProjector,
+    DiscoveredCluster, DistanceMetric, EmbeddingClusterAssigner, EvalCluster,
+    FnClusterAssignmentRule, KMeansClusterDiscovery, KeywordAssignmentRule, MetadataAssignmentRule,
+    ProjectedField, RuleBasedClusterAssigner,
 };
 pub use error::{Result, TraceEvalError};
 pub use evaluation::{
@@ -35,9 +39,13 @@ pub use validation::{ValidationIssue, ValidationProfile, ValidationReport, Valid
 
 pub mod prelude {
     pub use crate::clustering::{
-        ClusterAssigner, ClusterAssignment, ClusterAssignmentRule, ClusterRuleMatch, EvalCluster,
-        FnClusterAssignmentRule, KeywordAssignmentRule, MetadataAssignmentRule,
-        RuleBasedClusterAssigner,
+        CaseEmbedding, ClusterAlgorithm, ClusterAssigner, ClusterAssignment, ClusterAssignmentRule,
+        ClusterDiscovery, ClusterDiscoveryInput, ClusterDiscoveryOptions, ClusterLabel,
+        ClusterLabeler, ClusterModel, ClusterModelAssigner, ClusterModelSource, ClusterQuality,
+        ClusterQualityReport, ClusterRuleMatch, ClusterText, ClusterTextProjector,
+        DefaultClusterTextProjector, DiscoveredCluster, DistanceMetric, EmbeddingClusterAssigner,
+        EvalCluster, FnClusterAssignmentRule, KMeansClusterDiscovery, KeywordAssignmentRule,
+        MetadataAssignmentRule, ProjectedField, RuleBasedClusterAssigner,
     };
     pub use crate::error::{Result, TraceEvalError};
     pub use crate::evaluation::{

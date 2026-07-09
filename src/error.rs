@@ -29,6 +29,25 @@ pub enum TraceEvalError {
     #[error("cluster assignment failed for case {case_id}: {message}")]
     ClusterAssignment { case_id: String, message: String },
 
+    #[error("invalid embedding for case {case_id}: {message}")]
+    InvalidEmbedding { case_id: String, message: String },
+
+    #[error("embedding provider {provider} failed: {message}")]
+    EmbeddingProvider { provider: String, message: String },
+
+    #[error("cluster discovery with {algorithm} failed: {message}")]
+    ClusterDiscovery { algorithm: String, message: String },
+
+    #[error("cluster labeling with {provider} failed for cluster {cluster_id}: {message}")]
+    ClusterLabeling {
+        provider: String,
+        cluster_id: String,
+        message: String,
+    },
+
+    #[error("cluster model {model_id} is invalid: {message}")]
+    ClusterModelValidation { model_id: String, message: String },
+
     #[error("validation failed with {error_count} errors and {warning_count} warnings")]
     ValidationFailed {
         error_count: usize,

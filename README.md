@@ -136,7 +136,7 @@ cargo run --bin traceeval -- calibrate \
 Assign known clusters and annotate results:
 
 ```bash
-cargo run --bin traceeval -- cluster \
+cargo run --bin traceeval -- cluster assign \
   --cases eval_cases.jsonl \
   --clusters fixtures/eval/clusters.jsonl \
   --out cluster_assignments.jsonl \
@@ -281,7 +281,7 @@ Library APIs return `traces_to_evals::Result<T>` with `TraceEvalError` variants 
 
 ## Planned Work
 
-See [docs/api-and-product-roadmap.md](docs/api-and-product-roadmap.md) for API/product cleanup, [docs/missing.md](docs/missing.md) for remaining work, and [docs/scoring-design.md](docs/scoring-design.md) for the scoring, calibration, clustering, and optional ML design.
+See [docs/api-and-product-roadmap.md](docs/api-and-product-roadmap.md) for API/product cleanup, [docs/missing.md](docs/missing.md) for remaining work, [docs/scoring-design.md](docs/scoring-design.md) for scoring and calibration design, and [docs/cluster-discovery.md](docs/cluster-discovery.md) for the full cluster discovery, embedding, and LLM labeling spec.
 
 Near-term implementation priorities:
 

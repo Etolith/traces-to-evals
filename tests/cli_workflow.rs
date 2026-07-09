@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-use serde_json::Value;
+use serde_json::{Value, json};
 use tempfile::tempdir;
 
 fn repo_path(path: &str) -> PathBuf {
@@ -76,7 +76,7 @@ fn cli_runs_extract_grade_calibrate_cluster_report_workflow() {
 
     assert_success(
         traceeval()
-            .args(["cluster", "--cases"])
+            .args(["cluster", "assign", "--cases"])
             .arg(&cases)
             .args(["--clusters"])
             .arg(repo_path("fixtures/eval/clusters.jsonl"))
@@ -109,6 +109,110 @@ fn cli_runs_extract_grade_calibrate_cluster_report_workflow() {
     assert_eq!(report["total_results"], 1);
     assert_eq!(report["run_score"]["result_count"], 1);
     assert_eq!(report["cluster_scores"][0]["cluster_id"], "arithmetic");
+}
+
+#[test]
+fn cli_cluster_assigns_from_discovered_model_and_embeddings() {
+    let dir = tempdir().unwrap();
+    let cases = dir.path().join("cases.jsonl");
+    let embeddings = dir.path().join("embeddings.jsonl");
+    let model = dir.path().join("cluster_model.json");
+    let assignments = dir.path().join("assignments.jsonl");
+
+    std::fs::write(
+        &cases,
+        r#"{"id":"case-new","trace_id":"trace-new","input":"Help with invoice","actual_output":"ok"}
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        &embeddings,
+        r#"{"schema_version":"traceeval.case_embedding.v1","case_id":"case-new","trace_id":"trace-new","provider":"test","model":"test-embedding","dimensions":2,"vector":[0.99,0.01],"projection_version":"traceeval.cluster_text.v1","text_hash":"abc"}
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        &model,
+        serde_json::to_string_pretty(&json!({
+            "schema_version": "traceeval.cluster_model.v1",
+            "model_id": "model-1",
+            "created_at": "2026-01-01T00:00:00Z",
+            "source": {
+                "case_count": 2,
+                "embedding_provider": "test",
+                "embedding_model": "test-embedding",
+                "embedding_dimensions": 2,
+                "projection_version": "traceeval.cluster_text.v1",
+                "algorithm": "manual",
+                "distance_metric": "cosine",
+                "random_seed": 42
+            },
+            "clusters": [
+                {
+                    "id": "billing",
+                    "size": 2,
+                    "centroid": [1.0, 0.0],
+                    "representative_case_ids": ["case-a"],
+                    "radius": null,
+                    "mean_distance": null,
+                    "quality": {
+                        "cluster_id": "billing",
+                        "size": 2,
+                        "mean_distance": null,
+                        "max_distance": null,
+                        "silhouette_score": null,
+                        "representative_case_ids": ["case-a"]
+                    }
+                }
+            ],
+            "assignments": [],
+            "quality": {
+                "cluster_count": 1,
+                "assigned_case_count": 2,
+                "mean_distance": null,
+                "silhouette_score": null,
+                "clusters": [
+                    {
+                        "cluster_id": "billing",
+                        "size": 2,
+                        "mean_distance": null,
+                        "max_distance": null,
+                        "silhouette_score": null,
+                        "representative_case_ids": ["case-a"]
+                    }
+                ]
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    assert_success(
+        traceeval()
+            .args(["cluster", "assign", "--cases"])
+            .arg(&cases)
+            .args(["--model"])
+            .arg(&model)
+            .args(["--embeddings"])
+            .arg(&embeddings)
+            .args(["--out"])
+            .arg(&assignments)
+            .output()
+            .unwrap(),
+    );
+
+    let assignment: Value = serde_json::from_str(
+        std::fs::read_to_string(assignments)
+            .unwrap()
+            .lines()
+            .next()
+            .unwrap(),
+    )
+    .unwrap();
+
+    assert_eq!(assignment["cluster_id"], "billing");
+    assert_eq!(assignment["method"], "embedding_nearest_centroid");
+    assert!(assignment["distance"].as_f64().unwrap() < 0.001);
 }
 
 #[test]

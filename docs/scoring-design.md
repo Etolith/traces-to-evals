@@ -214,6 +214,8 @@ Do not add a general ML optimizer until the simple binning model is insufficient
 
 ## 4. Cluster-Aware Scoring
 
+Authoritative cluster discovery spec: [cluster-discovery.md](cluster-discovery.md).
+
 Clustering should select context and thresholds. It should not be the grader.
 
 The current crate implements rule-based assignment to a known cluster taxonomy. True cluster discovery is a separate future feature.
@@ -248,62 +250,41 @@ new EvalCase
     -> calibrated score
 ```
 
-Proposed types:
-
-```rust
-pub struct EvalCluster {
-    pub id: String,
-    pub label: Option<String>,
-    pub case_ids: Vec<String>,
-    pub centroid: Option<Vec<f32>>,
-    pub rubric: Option<String>,
-    pub pass_threshold: f32,
-    pub weight: f32,
-    pub mean_human_score: f32,
-    pub human_pass_rate: f32,
-    pub known_failure_modes: Vec<String>,
-}
-
-pub struct ClusterAssignment {
-    pub case_id: String,
-    pub cluster_id: Option<String>,
-    pub distance: Option<f32>,
-    pub confidence: f32,
-    pub novelty: bool,
-}
-
-pub trait ClusterLabeler {
-    async fn label_cluster(
-        &self,
-        cluster: &DiscoveredCluster,
-        examples: &[EvalCase],
-    ) -> anyhow::Result<ClusterLabel>;
-}
-
-pub struct ClusterLabel {
-    pub label: String,
-    pub description: String,
-    pub suggested_rubric: Option<String>,
-    pub known_failure_modes: Vec<String>,
-}
-```
-
 Target commands:
 
 ```bash
-traceeval cluster build \
+traceeval cluster embed \
   --cases historical_eval_cases.jsonl \
-  --human-ratings human_ratings.jsonl \
+  --provider openai \
+  --model text-embedding-3-small \
+  --out historical_embeddings.jsonl
+```
+
+```bash
+traceeval cluster discover \
+  --cases historical_eval_cases.jsonl \
   --embeddings historical_embeddings.jsonl \
   --algorithm kmeans \
   --k 12 \
-  --out eval_clusters.jsonl
+  --out-model cluster_model.json \
+  --out-assignments cluster_assignments.jsonl \
+  --out-clusters eval_clusters.jsonl
+```
+
+```bash
+traceeval cluster label \
+  --model cluster_model.json \
+  --cases historical_eval_cases.jsonl \
+  --provider openai \
+  --llm-model <openai-chat-model> \
+  --out-model labeled_cluster_model.json \
+  --out-clusters labeled_clusters.jsonl
 ```
 
 ```bash
 traceeval cluster assign \
   --cases new_eval_cases.jsonl \
-  --clusters eval_clusters.jsonl \
+  --model labeled_cluster_model.json \
   --embeddings new_embeddings.jsonl \
   --out cluster_assignments.jsonl
 ```
@@ -340,12 +321,12 @@ Recommended feature plan:
 [features]
 default = []
 cli = ["clap"]
-llm-judge-openai = ["openai_dive", "async-trait", "tokio"]
-embeddings-openai = ["openai_dive"]
+llm-judge-openai = ["openai_dive", "schemars", "tokio"]
+embeddings-openai = ["openai_dive", "tokio"]
 embeddings-local = ["fastembed"]
-clustering = ["linfa", "linfa-clustering", "ndarray"]
-ann-local = ["hnsw_rs"]
-vector-qdrant = ["qdrant-client"]
+clustering-linfa = ["linfa", "linfa-clustering", "ndarray"]
+cluster-label-openai = ["openai_dive", "schemars", "tokio"]
+ann-hnsw = ["hnsw_rs"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"], optional = true }
@@ -354,7 +335,6 @@ linfa-clustering = { version = "0.8", optional = true }
 ndarray = { version = "0.17", optional = true }
 fastembed = { version = "5", optional = true }
 hnsw_rs = { version = "0.3", optional = true }
-qdrant-client = { version = "1", optional = true }
 ```
 
 Recommended order:
@@ -369,13 +349,16 @@ Recommended order:
 3. embeddings-openai
    Reuse openai_dive to generate embeddings for EvalCase input/rubric/tool summary.
 
-4. clustering
+4. clustering-linfa
    Add linfa-clustering + ndarray for K-Means first.
 
-5. ann-local or vector-qdrant
-   Add only when brute-force cosine search is too slow.
+5. cluster-label-openai
+   Add OpenAI labels after discovered clusters and representatives exist.
 
-6. embeddings-local
+6. ann-hnsw
+   Add only when brute-force centroid search is too slow.
+
+7. embeddings-local
    Add fastembed only when offline/local embedding generation is a product requirement.
 ```
 

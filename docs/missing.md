@@ -145,6 +145,8 @@ This should now be feasible because report and cluster assignment APIs exist. It
 
 ## P1: Real Cluster Discovery
 
+Authoritative spec: [cluster-discovery.md](cluster-discovery.md).
+
 The current implementation is rule-based assignment to an existing cluster taxonomy. It is not data-driven clustering.
 
 Implemented:
@@ -152,46 +154,27 @@ Implemented:
 - Exact assignment from metadata fields such as `cluster_id`.
 - Keyword/lexical fallback against provided cluster definitions.
 - `unclustered` fallback for unknown cases.
+- Versioned cluster discovery schema types.
+- Deterministic cluster text projection.
+- Case embedding row schema and validation.
+- Brute-force nearest-centroid assignment from a manually constructed `ClusterModel`.
+- `EmbeddingProvider`, `ClusterDiscovery`, `ClusterLabeler`, and embedding-aware assignment traits.
+- `traceeval cluster assign` for rule-based assignment and discovered-model nearest-centroid assignment.
+- CLI contracts for `cluster embed`, `cluster discover`, and `cluster label` with explicit pending-backend errors.
 
 Missing:
 
-- A separate `ClusterDiscovery` trait for fitting clusters from cases.
-- A `ClusterModel` produced from feature vectors or embeddings.
-- A separate `ClusterLabeler` trait for naming and describing discovered clusters.
-- Evaluation of cluster quality.
-- Optional embedding-based and ML-backed implementations.
-
-Potential future API:
-
-```rust
-pub trait ClusterDiscovery {
-    fn fit(&self, cases: &[EvalCase]) -> anyhow::Result<ClusterModel>;
-}
-
-pub struct ClusterModel {
-    pub clusters: Vec<DiscoveredCluster>,
-    pub assignments: Vec<ClusterAssignment>,
-}
-
-pub trait ClusterLabeler {
-    async fn label_cluster(
-        &self,
-        cluster: &DiscoveredCluster,
-        examples: &[EvalCase],
-    ) -> anyhow::Result<ClusterLabel>;
-}
-
-pub struct ClusterLabel {
-    pub label: String,
-    pub description: String,
-    pub suggested_rubric: Option<String>,
-    pub known_failure_modes: Vec<String>,
-}
-```
+- A real `ClusterDiscovery` implementation that fits clusters from cases and embeddings.
+- A `ClusterModel` produced automatically from feature vectors or embeddings.
+- A real `ClusterLabeler` implementation for naming and describing discovered clusters.
+- Cluster quality metrics beyond schema support.
+- Optional embedding provider and ML-backed implementations.
+- Functional backends behind `cluster embed`, `cluster discover`, and `cluster label`.
 
 Keep these responsibilities separate:
 
-- `ClusterDiscovery` creates groups from historical cases.
+- `EmbeddingProvider` creates embeddings from projected case text.
+- `ClusterDiscovery` creates groups from historical cases and embeddings.
 - `ClusterLabeler` names and explains those groups, commonly with an LLM.
 - `ClusterAssigner` maps new cases into a known taxonomy or discovered cluster model.
 
@@ -268,10 +251,10 @@ Possible features:
 
 ```toml
 embeddings-openai = [...]
-embeddings-fastembed = [...]
+embeddings-local = [...]
 clustering-linfa = [...]
-vector-hnsw = [...]
-vector-qdrant = [...]
+cluster-label-openai = [...]
+ann-hnsw = [...]
 ```
 
 Recommended order:
@@ -319,7 +302,7 @@ traceeval calibrate \
   --results fixtures/eval/historical_results.jsonl \
   --out target/tmp/calibration.json
 
-traceeval cluster \
+traceeval cluster assign \
   --cases target/tmp/cases.jsonl \
   --clusters fixtures/eval/clusters.jsonl \
   --out target/tmp/cluster_assignments.jsonl \

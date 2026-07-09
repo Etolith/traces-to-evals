@@ -9,6 +9,22 @@ use crate::Result;
 use crate::evaluation::EvaluationResult;
 use crate::model::EvalCase;
 
+pub mod discovery;
+pub mod embedding;
+pub mod labeling;
+pub mod quality;
+
+pub use discovery::{
+    ClusterAlgorithm, ClusterDiscovery, ClusterDiscoveryInput, ClusterDiscoveryOptions,
+    ClusterModel, ClusterModelAssigner, ClusterModelSource, DiscoveredCluster, DistanceMetric,
+    EmbeddingClusterAssigner, KMeansClusterDiscovery,
+};
+pub use embedding::{
+    CaseEmbedding, ClusterText, ClusterTextProjector, DefaultClusterTextProjector, ProjectedField,
+};
+pub use labeling::{ClusterLabel, ClusterLabeler};
+pub use quality::{ClusterQuality, ClusterQualityReport};
+
 pub const UNCLUSTERED: &str = "unclustered";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -30,6 +46,42 @@ pub struct ClusterAssignment {
     pub cluster_id: String,
     pub confidence: f32,
     pub method: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub distance: Option<f32>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub novelty: bool,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub metadata: BTreeMap<String, Value>,
+}
+
+impl ClusterAssignment {
+    pub fn new(
+        case: &EvalCase,
+        cluster_id: impl Into<String>,
+        confidence: f32,
+        method: impl Into<String>,
+    ) -> Self {
+        Self {
+            case_id: case.id.clone(),
+            trace_id: case.trace_id.clone(),
+            cluster_id: cluster_id.into(),
+            confidence: confidence.clamp(0.0, 1.0),
+            method: method.into(),
+            distance: None,
+            novelty: false,
+            metadata: BTreeMap::new(),
+        }
+    }
+
+    pub fn with_distance(mut self, distance: f32) -> Self {
+        self.distance = Some(distance);
+        self
+    }
+
+    pub fn with_novelty(mut self, novelty: bool) -> Self {
+        self.novelty = novelty;
+        self
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -271,23 +323,21 @@ impl ClusterAssigner for RuleBasedClusterAssigner {
     fn assign_case(&self, case: &EvalCase) -> Result<ClusterAssignment> {
         for rule in &self.rules {
             if let Some(rule_match) = rule.assign(case, &self.clusters) {
-                return Ok(ClusterAssignment {
-                    case_id: case.id.clone(),
-                    trace_id: case.trace_id.clone(),
-                    cluster_id: rule_match.cluster_id,
-                    confidence: rule_match.confidence,
-                    method: rule.method().to_string(),
-                });
+                return Ok(ClusterAssignment::new(
+                    case,
+                    rule_match.cluster_id,
+                    rule_match.confidence,
+                    rule.method(),
+                ));
             }
         }
 
-        Ok(ClusterAssignment {
-            case_id: case.id.clone(),
-            trace_id: case.trace_id.clone(),
-            cluster_id: self.fallback_cluster_id.clone(),
-            confidence: 0.0,
-            method: "fallback".to_string(),
-        })
+        Ok(ClusterAssignment::new(
+            case,
+            self.fallback_cluster_id.clone(),
+            0.0,
+            "fallback",
+        ))
     }
 }
 
@@ -335,6 +385,16 @@ pub fn apply_assignments_to_results(
                 "cluster_confidence".to_string(),
                 Value::from(assignment.confidence),
             );
+            if let Some(distance) = assignment.distance {
+                result
+                    .metadata
+                    .insert("cluster_distance".to_string(), Value::from(distance));
+            }
+            if assignment.novelty {
+                result
+                    .metadata
+                    .insert("cluster_novelty".to_string(), Value::from(true));
+            }
         }
     }
 
@@ -393,6 +453,10 @@ fn default_weight() -> f32 {
     1.0
 }
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -418,13 +482,7 @@ mod tests {
     fn applies_assignments_to_results() {
         let case = EvalCase::new("case-1", "trace-1", "input");
         let result = EvaluationResult::binary(&case, "non_empty", true, "ok");
-        let assignment = ClusterAssignment {
-            case_id: "case-1".to_string(),
-            trace_id: "trace-1".to_string(),
-            cluster_id: "arithmetic".to_string(),
-            confidence: 1.0,
-            method: "metadata".to_string(),
-        };
+        let assignment = ClusterAssignment::new(&case, "arithmetic", 1.0, "metadata");
 
         let results = apply_assignments_to_results(vec![result], &[assignment]);
 

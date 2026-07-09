@@ -128,3 +128,60 @@ fn public_api_composes_trace_extraction_evaluation_calibration_and_aggregation()
     assert_eq!(round_tripped.len(), run.results().len());
     Ok(())
 }
+
+#[test]
+fn public_api_composes_cluster_discovery_primitives() -> Result<()> {
+    let case = EvalCase::new("case-1", "trace-1", "reset my password")
+        .with_expected_output("Use the reset link")
+        .with_actual_output("irrelevant output for projection");
+
+    let projector = DefaultClusterTextProjector::new();
+    let projected = projector.project_case(&case);
+    assert!(!projected.text.contains("actual_output"));
+
+    let embedding = CaseEmbedding::new(
+        &projected,
+        "test-provider",
+        "test-model",
+        vec![1.0, 0.0],
+        projector.projection_version(),
+    );
+    embedding.validate()?;
+
+    let cluster = DiscoveredCluster::new("cluster-0001", 1, vec![case.id.clone()])
+        .with_centroid(vec![1.0, 0.0]);
+    let quality = ClusterQualityReport {
+        cluster_count: 1,
+        assigned_case_count: 1,
+        mean_distance: Some(0.0),
+        silhouette_score: None,
+        clusters: vec![cluster.quality.clone()],
+    };
+    let model = ClusterModel::new(
+        "model-1",
+        "2026-01-01T00:00:00Z",
+        ClusterModelSource {
+            case_count: 1,
+            embedding_provider: Some("test-provider".to_string()),
+            embedding_model: Some("test-model".to_string()),
+            embedding_dimensions: Some(2),
+            projection_version: Some(projector.projection_version().to_string()),
+            algorithm: "manual".to_string(),
+            distance_metric: "cosine".to_string(),
+            random_seed: 42,
+        },
+        vec![cluster],
+        Vec::new(),
+        quality,
+    );
+    model.validate()?;
+
+    let assignment =
+        ClusterModelAssigner::new(model).assign_case_embedding(&case, &embedding.vector)?;
+    assert_eq!(assignment.cluster_id, "cluster-0001");
+    assert_eq!(assignment.method, "embedding_nearest_centroid");
+    assert_eq!(assignment.distance, Some(0.0));
+    assert!(!assignment.novelty);
+
+    Ok(())
+}
