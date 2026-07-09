@@ -500,25 +500,25 @@ Phase 1: CLI and result unification
 - Keep ScoredResult as a compatibility alias. Done.
 - Convert GradeResult and JudgeResult into EvaluationResult. Done.
 - Add EvaluationRun and weighted aggregation. Done.
-- Add traceeval report without cluster support.
+- Add traceeval report. Done.
 ```
 
 Phase 2: calibration v1
 
 ```text
 - Add CalibrationModel. Done for library API.
-- Add traceeval calibrate.
-- Add traceeval grade --calibration.
-- Use score bins first.
+- Add traceeval calibrate. Done.
+- Apply calibration in traceeval report. Done.
+- Use score bins first. Done.
 ```
 
 Phase 3: cluster assignment without ML
 
 ```text
-- Add EvalCluster and ClusterAssignment.
-- Build clusters from explicit metadata tags.
-- Assign by exact tag and lexical similarity.
-- Add per-cluster aggregate reports.
+- Add EvalCluster and ClusterAssignment. Done.
+- Build clusters from explicit metadata tags. Done.
+- Assign by exact tag and lexical similarity. Done.
+- Add per-cluster aggregate reports. Done.
 ```
 
 Phase 4: embeddings and ML clustering

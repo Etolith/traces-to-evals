@@ -1,5 +1,6 @@
 pub mod calibration;
 pub mod cli;
+pub mod clustering;
 mod commands;
 pub mod evaluation;
 pub mod export;
@@ -11,15 +12,20 @@ pub mod judge;
 pub mod model;
 #[cfg(feature = "llm-judge-openai")]
 pub mod providers;
+pub mod report;
 pub mod scoring;
+pub mod validation;
 
+pub use clustering::{ClusterAssignment, Clusterer, EvalCluster, MetadataClusterer};
 pub use evaluation::{
     AsyncEvaluator, EvaluationCriteria, EvaluationResult, EvaluationRun, Evaluator, RunScore,
     ScoreScale, WeightedAggregate,
 };
 pub use model::{EvalCase, Span, SpanKind, Trace};
+pub use report::{ClusterScore, EvaluationReport, EvaluatorScore};
 
 pub mod prelude {
+    pub use crate::clustering::{ClusterAssignment, Clusterer, EvalCluster, MetadataClusterer};
     pub use crate::evaluation::{
         AsyncEvaluator, EvaluationCriteria, EvaluationResult, EvaluationRun, Evaluator, RunScore,
         ScoreScale, WeightedAggregate,
@@ -29,4 +35,5 @@ pub mod prelude {
         ContainsGrader, DeterministicGrader, ExactMatchGrader, NonEmptyOutputGrader,
     };
     pub use crate::model::{EvalCase, Span, SpanKind, Trace};
+    pub use crate::report::{ClusterScore, EvaluationReport, EvaluatorScore};
 }

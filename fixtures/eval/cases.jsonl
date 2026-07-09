@@ -1,0 +1,3 @@
+{"id":"trace-openinference-1:root","trace_id":"trace-openinference-1","input":"What is 2 + 2?","actual_output":"4","expected_output":"4","metadata":{"cluster_id":"arithmetic"}}
+{"id":"case-summarize-1","trace_id":"trace-summarize-1","input":"Summarize: the agent retrieved weather data and answered with the forecast.","actual_output":"The agent retrieved weather data and answered with the forecast.","expected_output":"The agent retrieved weather data and answered with the forecast.","metadata":{"cluster_id":"summarization"}}
+{"id":"case-missing-output-1","trace_id":"trace-missing-1","input":"What is 5 + 5?","expected_output":"10","metadata":{"cluster_id":"arithmetic"}}

@@ -1,0 +1,2 @@
+{"id":"arithmetic","label":"Arithmetic","description":"Arithmetic and direct calculation tasks.","weight":1.5,"metadata":{"tag":"arithmetic","keywords":["math","arithmetic","2 + 2","5 + 5"]}}
+{"id":"summarization","label":"Summarization","description":"Trace and document summarization tasks.","weight":1.0,"metadata":{"tag":"summarization","keywords":["summarize","summary","forecast"]}}

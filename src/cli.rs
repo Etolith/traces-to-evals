@@ -15,10 +15,33 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    /// Extract eval cases from trace JSONL.
+    Extract(ExtractArgs),
     /// Grade eval cases with a deterministic grader or judge provider.
     Grade(GradeArgs),
     /// Compatibility alias for `grade --judge openai-dive`.
     Judge(JudgeArgs),
+    /// Validate eval cases and evaluation results.
+    Validate(ValidateArgs),
+    /// Fit a calibration model from historical results and human ratings.
+    Calibrate(CalibrateArgs),
+    /// Assign cases and optional results to clusters.
+    Cluster(ClusterArgs),
+    /// Build an aggregate evaluation report.
+    Report(ReportArgs),
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct ExtractArgs {
+    /// Input trace JSONL file.
+    #[arg(long)]
+    pub traces: PathBuf,
+    /// Trace format to extract.
+    #[arg(long, value_enum, default_value = "simple")]
+    pub format: ExtractFormat,
+    /// Output eval cases JSONL file.
+    #[arg(long)]
+    pub out: PathBuf,
 }
 
 #[derive(Debug, Clone, Args)]
@@ -59,6 +82,77 @@ pub struct JudgeArgs {
     pub out: PathBuf,
 }
 
+#[derive(Debug, Clone, Args)]
+pub struct ValidateArgs {
+    /// Input eval cases JSONL file.
+    #[arg(long)]
+    pub cases: Option<PathBuf>,
+    /// Input evaluation results JSONL file.
+    #[arg(long)]
+    pub results: Option<PathBuf>,
+    /// Optional validation report JSON output file.
+    #[arg(long)]
+    pub out: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct CalibrateArgs {
+    /// Human ratings JSONL file.
+    #[arg(long = "human-ratings")]
+    pub human_ratings: PathBuf,
+    /// Historical evaluation results JSONL file.
+    #[arg(long)]
+    pub results: PathBuf,
+    /// Human score threshold treated as pass.
+    #[arg(long = "pass-threshold", default_value_t = 3)]
+    pub pass_threshold: u8,
+    /// Output calibration model JSON file.
+    #[arg(long)]
+    pub out: PathBuf,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct ClusterArgs {
+    /// Input eval cases JSONL file.
+    #[arg(long)]
+    pub cases: PathBuf,
+    /// Cluster definitions JSONL file.
+    #[arg(long)]
+    pub clusters: PathBuf,
+    /// Output cluster assignments JSONL file.
+    #[arg(long)]
+    pub out: PathBuf,
+    /// Optional evaluation results JSONL file to annotate with cluster IDs.
+    #[arg(long)]
+    pub results: Option<PathBuf>,
+    /// Optional output path for annotated evaluation results.
+    #[arg(long = "results-out", requires = "results")]
+    pub results_out: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct ReportArgs {
+    /// Evaluation results JSONL file.
+    #[arg(long)]
+    pub results: PathBuf,
+    /// Optional calibration model JSON file.
+    #[arg(long)]
+    pub calibration: Option<PathBuf>,
+    /// Optional cluster definitions JSONL file for cluster weights.
+    #[arg(long)]
+    pub clusters: Option<PathBuf>,
+    /// Output report JSON file.
+    #[arg(long)]
+    pub out: PathBuf,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ExtractFormat {
+    Simple,
+    #[value(name = "openinference", alias = "open-inference")]
+    OpenInference,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum DeterministicGraderName {
     NonEmptyOutput,
@@ -74,16 +168,26 @@ pub enum JudgeProviderName {
 #[cfg(feature = "llm-judge-openai")]
 pub async fn run() -> Result<()> {
     match Cli::parse().command {
+        Command::Extract(args) => commands::extract::run(args),
         Command::Grade(args) => commands::grade::run(args).await,
         Command::Judge(args) => commands::judge::run(args).await,
+        Command::Validate(args) => commands::validate::run(args),
+        Command::Calibrate(args) => commands::calibrate::run(args),
+        Command::Cluster(args) => commands::cluster::run(args),
+        Command::Report(args) => commands::report::run(args),
     }
 }
 
 #[cfg(not(feature = "llm-judge-openai"))]
 pub fn run() -> Result<()> {
     match Cli::parse().command {
+        Command::Extract(args) => commands::extract::run(args),
         Command::Grade(args) => commands::grade::run(args),
         Command::Judge(args) => commands::judge::run(args),
+        Command::Validate(args) => commands::validate::run(args),
+        Command::Calibrate(args) => commands::calibrate::run(args),
+        Command::Cluster(args) => commands::cluster::run(args),
+        Command::Report(args) => commands::report::run(args),
     }
 }
 

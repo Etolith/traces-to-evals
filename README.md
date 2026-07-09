@@ -62,6 +62,23 @@ Run tests:
 cargo test
 ```
 
+Extract eval cases from OpenInference-style traces:
+
+```bash
+cargo run --bin traceeval -- extract \
+  --format openinference \
+  --traces fixtures/openinference/traces.jsonl \
+  --out eval_cases.jsonl
+```
+
+Validate cases or evaluation results:
+
+```bash
+cargo run --bin traceeval -- validate \
+  --cases eval_cases.jsonl \
+  --out validation.json
+```
+
 Evaluate cases deterministically:
 
 ```bash
@@ -107,6 +124,36 @@ cargo run --features llm-judge-openai --bin traceeval -- judge \
 ```
 
 The OpenAI path reads credentials from the environment, so set `OPENAI_API_KEY` before running it.
+
+Fit calibration from historical evaluation results:
+
+```bash
+cargo run --bin traceeval -- calibrate \
+  --human-ratings fixtures/eval/human_ratings.jsonl \
+  --results fixtures/eval/historical_results.jsonl \
+  --out calibration.json
+```
+
+Assign clusters and annotate results:
+
+```bash
+cargo run --bin traceeval -- cluster \
+  --cases eval_cases.jsonl \
+  --clusters fixtures/eval/clusters.jsonl \
+  --out cluster_assignments.jsonl \
+  --results evaluation_results.jsonl \
+  --results-out clustered_results.jsonl
+```
+
+Build an aggregate report:
+
+```bash
+cargo run --bin traceeval -- report \
+  --results clustered_results.jsonl \
+  --calibration calibration.json \
+  --clusters fixtures/eval/clusters.jsonl \
+  --out report.json
+```
 
 ## Library Example
 
@@ -211,11 +258,11 @@ EvalCaseCsvExporter::write(path, &cases)?;
 
 ## Planned Work
 
-See [docs/missing.md](docs/missing.md) for the implementation checklist and [docs/scoring-design.md](docs/scoring-design.md) for the scoring, calibration, clustering, and optional ML design.
+See [docs/missing.md](docs/missing.md) for remaining work and [docs/scoring-design.md](docs/scoring-design.md) for the scoring, calibration, clustering, and optional ML design.
 
 Near-term implementation priorities:
 
-- add an OpenInference import command
-- add validation/report commands
-- add calibration model CLI output
-- add weighted aggregate run reports
+- add failed-case detail to reports
+- add validation profiles
+- add calibration mismatch warnings
+- revisit public API visibility
