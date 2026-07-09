@@ -16,7 +16,13 @@ pub mod report;
 pub mod scoring;
 pub mod validation;
 
-pub use clustering::{ClusterAssignment, Clusterer, EvalCluster, MetadataClusterer};
+pub use clustering::{
+    ClusterAssigner, ClusterAssignment, ClusterAssignmentRule, ClusterRuleMatch, EvalCluster,
+    FnClusterAssignmentRule, KeywordAssignmentRule, MetadataAssignmentRule,
+    RuleBasedClusterAssigner,
+};
+#[allow(deprecated)]
+pub use clustering::{Clusterer, MetadataClusterer};
 pub use evaluation::{
     AsyncEvaluator, EvaluationCriteria, EvaluationResult, EvaluationRun, Evaluator, RunScore,
     ScoreScale, WeightedAggregate,
@@ -25,7 +31,11 @@ pub use model::{EvalCase, Span, SpanKind, Trace};
 pub use report::{ClusterScore, EvaluationReport, EvaluatorScore};
 
 pub mod prelude {
-    pub use crate::clustering::{ClusterAssignment, Clusterer, EvalCluster, MetadataClusterer};
+    pub use crate::clustering::{
+        ClusterAssigner, ClusterAssignment, ClusterAssignmentRule, ClusterRuleMatch, EvalCluster,
+        FnClusterAssignmentRule, KeywordAssignmentRule, MetadataAssignmentRule,
+        RuleBasedClusterAssigner,
+    };
     pub use crate::evaluation::{
         AsyncEvaluator, EvaluationCriteria, EvaluationResult, EvaluationRun, Evaluator, RunScore,
         ScoreScale, WeightedAggregate,

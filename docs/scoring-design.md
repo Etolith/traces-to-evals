@@ -226,6 +226,20 @@ Do not add a general ML optimizer until the simple binning model is insufficient
 
 Clustering should select context and thresholds. It should not be the grader.
 
+The current crate implements rule-based assignment to a known cluster taxonomy. True cluster discovery is a separate future feature.
+
+LLMs should usually be used after discovery to label and explain clusters, not as the primary clustering algorithm. A typical future flow is:
+
+```text
+EvalCase text
+  -> embeddings
+  -> clustering algorithm
+  -> representative examples
+  -> LLM-generated cluster label, description, rubric, and failure modes
+  -> optional human approval
+  -> cluster-aware scoring
+```
+
 Historical cases become task clusters:
 
 ```text
@@ -266,6 +280,21 @@ pub struct ClusterAssignment {
     pub distance: Option<f32>,
     pub confidence: f32,
     pub novelty: bool,
+}
+
+pub trait ClusterLabeler {
+    async fn label_cluster(
+        &self,
+        cluster: &DiscoveredCluster,
+        examples: &[EvalCase],
+    ) -> anyhow::Result<ClusterLabel>;
+}
+
+pub struct ClusterLabel {
+    pub label: String,
+    pub description: String,
+    pub suggested_rubric: Option<String>,
+    pub known_failure_modes: Vec<String>,
 }
 ```
 

@@ -10,7 +10,7 @@ traces
   -> validate cases/results
   -> grade into EvaluationResult JSONL
   -> calibrate from historical results + human ratings
-  -> assign clusters
+  -> assign known cluster IDs
   -> report aggregate quality
 ```
 
@@ -28,7 +28,8 @@ Core API:
 - `EvaluationReport`, `EvaluatorScore`, and `ClusterScore`.
 - `CalibrationModel::fit()` for simple bin-based calibration.
 - `CalibrationModel::apply()` and `apply_run()` for calibrated result output.
-- `EvalCluster`, `ClusterAssignment`, `Clusterer`, and `MetadataClusterer`.
+- `EvalCluster`, `ClusterAssignment`, `ClusterAssigner`, and `RuleBasedClusterAssigner`.
+- `ClusterAssignmentRule`, `MetadataAssignmentRule`, `KeywordAssignmentRule`, and `FnClusterAssignmentRule`.
 - `ValidationReport` and fixture-backed validation checks.
 - `GradeResult` and `JudgeResult` conversions into `EvaluationResult`.
 
@@ -131,13 +132,77 @@ let report = TraceEval::new()
     .extract_with(OpenInferenceExtractor)
     .evaluate_with(ExactMatchGrader)
     .calibrate_with(calibration_model)
-    .cluster_with(clusterer)
+    .assign_clusters_with(assigner)
     .aggregate_with(weights)
     .run_traces(traces)
     .await?;
 ```
 
-This should now be feasible because report and cluster APIs exist. It should be implemented only if it removes real ceremony from common workflows.
+This should now be feasible because report and cluster assignment APIs exist. It should be implemented only if it removes real ceremony from common workflows.
+
+## P1: Real Cluster Discovery
+
+The current implementation is rule-based assignment to an existing cluster taxonomy. It is not data-driven clustering.
+
+Implemented:
+
+- Exact assignment from metadata fields such as `cluster_id`.
+- Keyword/lexical fallback against provided cluster definitions.
+- `unclustered` fallback for unknown cases.
+
+Missing:
+
+- A separate `ClusterDiscovery` trait for fitting clusters from cases.
+- A `ClusterModel` produced from feature vectors or embeddings.
+- A separate `ClusterLabeler` trait for naming and describing discovered clusters.
+- Evaluation of cluster quality.
+- Optional embedding-based and ML-backed implementations.
+
+Potential future API:
+
+```rust
+pub trait ClusterDiscovery {
+    fn fit(&self, cases: &[EvalCase]) -> anyhow::Result<ClusterModel>;
+}
+
+pub struct ClusterModel {
+    pub clusters: Vec<DiscoveredCluster>,
+    pub assignments: Vec<ClusterAssignment>,
+}
+
+pub trait ClusterLabeler {
+    async fn label_cluster(
+        &self,
+        cluster: &DiscoveredCluster,
+        examples: &[EvalCase],
+    ) -> anyhow::Result<ClusterLabel>;
+}
+
+pub struct ClusterLabel {
+    pub label: String,
+    pub description: String,
+    pub suggested_rubric: Option<String>,
+    pub known_failure_modes: Vec<String>,
+}
+```
+
+Keep these responsibilities separate:
+
+- `ClusterDiscovery` creates groups from historical cases.
+- `ClusterLabeler` names and explains those groups, commonly with an LLM.
+- `ClusterAssigner` maps new cases into a known taxonomy or discovered cluster model.
+
+Expected future flow:
+
+```text
+historical EvalCase rows
+  -> embeddings
+  -> K-Means/HDBSCAN/BERTopic-style discovery
+  -> representative examples per cluster
+  -> LLM cluster labeling
+  -> human approval/editing
+  -> cluster-aware scoring and reporting
+```
 
 ## P1: Calibration Semantics
 
@@ -195,14 +260,14 @@ vector-qdrant = [...]
 
 Recommended order:
 
-1. Improve metadata clusterer.
-2. Improve lexical clusterer.
+1. Improve rule-based assignment.
+2. Add a separate discovery trait.
 3. Add embedding generation.
 4. Add local nearest-centroid assignment.
 5. Add K-Means or HDBSCAN-style clustering.
 6. Add approximate nearest-neighbor index or vector database.
 
-Do not add a broad ML dependency until the non-ML clustering API is stable.
+Do not add a broad ML dependency until the non-ML assignment API is stable.
 
 ## P2: Compatibility Policy
 

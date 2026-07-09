@@ -1,7 +1,9 @@
 use anyhow::{Result, anyhow};
 
 use crate::cli::ClusterArgs;
-use crate::clustering::{Clusterer, EvalCluster, MetadataClusterer, apply_assignments_to_results};
+use crate::clustering::{
+    ClusterAssigner, EvalCluster, RuleBasedClusterAssigner, apply_assignments_to_results,
+};
 use crate::evaluation::EvaluationResult;
 use crate::io::jsonl::JsonlFile;
 use crate::model::EvalCase;
@@ -9,8 +11,8 @@ use crate::model::EvalCase;
 pub fn run(args: ClusterArgs) -> Result<()> {
     let cases: Vec<EvalCase> = JsonlFile::new(&args.cases).read_all()?;
     let clusters: Vec<EvalCluster> = JsonlFile::new(&args.clusters).read_all()?;
-    let clusterer = MetadataClusterer::new(clusters);
-    let assignments = clusterer.assign_cases(&cases)?;
+    let assigner = RuleBasedClusterAssigner::new(clusters);
+    let assignments = assigner.assign_cases(&cases)?;
 
     JsonlFile::new(&args.out).write_all(&assignments)?;
 

@@ -51,15 +51,27 @@ fn public_api_composes_trace_extraction_evaluation_calibration_and_aggregation()
     let case_id = run.cases[0].id.clone();
     let trace_id = run.cases[0].trace_id.clone();
 
-    let clusterer = MetadataClusterer::new(vec![EvalCluster {
+    let assigner = RuleBasedClusterAssigner::empty(vec![EvalCluster {
         id: "arithmetic".to_string(),
         label: "Arithmetic".to_string(),
         description: None,
         weight: 1.5,
         metadata: BTreeMap::new(),
-    }]);
-    let assignments = clusterer.assign_cases(&run.cases)?;
+    }])
+    .with_rule(FnClusterAssignmentRule::new(
+        "custom_math_input",
+        |case, _clusters| {
+            if case.input.contains("2 + 2") {
+                Some(ClusterRuleMatch::new("arithmetic", 0.95))
+            } else {
+                None
+            }
+        },
+    ))
+    .with_rule(MetadataAssignmentRule::new());
+    let assignments = assigner.assign_cases(&run.cases)?;
     assert_eq!(assignments[0].cluster_id, "arithmetic");
+    assert_eq!(assignments[0].method, "custom_math_input");
 
     let run = run
         .evaluate_with(&NonEmptyOutputGrader)?

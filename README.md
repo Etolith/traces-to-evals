@@ -134,7 +134,7 @@ cargo run --bin traceeval -- calibrate \
   --out calibration.json
 ```
 
-Assign clusters and annotate results:
+Assign known clusters and annotate results:
 
 ```bash
 cargo run --bin traceeval -- cluster \
@@ -143,6 +143,30 @@ cargo run --bin traceeval -- cluster \
   --out cluster_assignments.jsonl \
   --results evaluation_results.jsonl \
   --results-out clustered_results.jsonl
+```
+
+Add a custom assignment rule in Rust:
+
+```rust
+use traces_to_evals::prelude::*;
+
+let clusters = vec![EvalCluster {
+    id: "billing".to_string(),
+    label: "Billing".to_string(),
+    description: None,
+    weight: 1.0,
+    metadata: Default::default(),
+}];
+
+let assigner = RuleBasedClusterAssigner::new(clusters).with_rule(
+    FnClusterAssignmentRule::new("billing_keyword", |case, _clusters| {
+        if case.input.to_ascii_lowercase().contains("invoice") {
+            Some(ClusterRuleMatch::new("billing", 0.9))
+        } else {
+            None
+        }
+    }),
+);
 ```
 
 Build an aggregate report:
