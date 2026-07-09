@@ -1,4 +1,3 @@
-use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "llm-judge-openai")]
 use serde_json::Value;
@@ -6,6 +5,7 @@ use serde_json::Value;
 use crate::evaluation::{EvaluationCriteria, EvaluationResult, ScoreScale};
 #[cfg(feature = "llm-judge-openai")]
 use crate::providers::chat::ResponseSchema;
+use crate::{Result, TraceEvalError};
 
 pub type JudgeCriteria = EvaluationCriteria;
 
@@ -60,12 +60,10 @@ impl JudgePayload {
         if (Self::MIN_SCORE..=Self::MAX_SCORE).contains(&score) {
             Ok(())
         } else {
-            Err(anyhow!(
-                "judge score must be between {} and {}, got {}",
-                Self::MIN_SCORE,
-                Self::MAX_SCORE,
-                score
-            ))
+            Err(TraceEvalError::InvalidScore {
+                score: f32::from(score),
+                scale: "four_point_judge".to_string(),
+            })
         }
     }
 }

@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 
-use anyhow::Result;
 use serde_json::Value;
 
 use traces_to_evals::calibration::{CalibrationModel, HumanRating};
@@ -32,6 +31,20 @@ impl Evaluator for DomainEvaluator {
             safety: true,
         }))
     }
+}
+
+#[test]
+fn public_api_exposes_typed_errors_for_common_failures() {
+    let case = EvalCase::new("case-1", "trace-1", "input");
+    let error = NonEmptyOutputGrader.grade(&case).unwrap_err();
+
+    assert!(matches!(
+        error,
+        TraceEvalError::MissingActualOutput { case_id } if case_id == "case-1"
+    ));
+
+    let error = CalibrationModel::fit(&[], &[], 3).unwrap_err();
+    assert!(matches!(error, TraceEvalError::CalibrationOverlap));
 }
 
 #[test]

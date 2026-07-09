@@ -1,4 +1,3 @@
-use anyhow::{Result, anyhow};
 use openai_dive::v1::api::Client;
 
 use crate::evaluation::{AsyncEvaluator, EvaluationResult};
@@ -8,6 +7,7 @@ use crate::judge::types::{JudgePayload, JudgeResult};
 use crate::model::EvalCase;
 use crate::providers::chat::{ChatClient, ChatRequest};
 use crate::providers::openai_dive::chat::OpenAiChatClient;
+use crate::{Result, TraceEvalError};
 
 pub struct OpenAiJudge<C = OpenAiChatClient> {
     chat_client: C,
@@ -47,10 +47,12 @@ where
     }
 
     pub async fn judge_case(&self, case: &EvalCase) -> Result<JudgeResult> {
-        let actual_output = case
-            .actual_output
-            .as_deref()
-            .ok_or_else(|| anyhow!("case {} has no actual_output", case.id))?;
+        let actual_output =
+            case.actual_output
+                .as_deref()
+                .ok_or_else(|| TraceEvalError::MissingActualOutput {
+                    case_id: case.id.clone(),
+                })?;
 
         let prompt = JudgePrompt::build(case, actual_output);
         let payload: JudgePayload = self

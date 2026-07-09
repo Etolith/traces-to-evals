@@ -1,8 +1,8 @@
-use anyhow::{Result, anyhow};
 use serde_json::Value;
 
 use crate::extractors::EvalCaseExtractor;
 use crate::model::{EvalCase, Span, SpanKind, Trace};
+use crate::{Result, TraceEvalError};
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct OpenInferenceExtractor;
@@ -39,7 +39,10 @@ fn trace_to_eval_case(trace: &Trace) -> Result<EvalCase> {
                 .find(|span| span_kind(span) == SpanKind::Llm && span_input(span).is_some())
         })
         .or_else(|| trace.spans.iter().find(|span| span_input(span).is_some()))
-        .ok_or_else(|| anyhow!("trace {} does not contain OpenInference input", trace.id))?;
+        .ok_or_else(|| TraceEvalError::MissingTraceInput {
+            trace_id: trace.id.clone(),
+            extractor: "openinference".to_string(),
+        })?;
 
     let output_span = trace
         .spans

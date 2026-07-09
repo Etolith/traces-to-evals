@@ -11,5 +11,6 @@ pub fn run(args: CalibrateArgs) -> Result<()> {
     let results: Vec<EvaluationResult> = JsonlFile::new(&args.results).read_all()?;
     let model = CalibrationModel::fit(&human_ratings, &results, args.pass_threshold)?;
 
-    JsonFile::new(args.out).write_pretty(&model)
+    JsonFile::new(args.out).write_pretty(&model)?;
+    Ok(())
 }

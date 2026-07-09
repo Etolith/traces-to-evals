@@ -4,12 +4,31 @@ use serde::{Deserialize, Serialize};
 
 use crate::evaluation::{EvaluationResult, ScoreScale};
 use crate::model::EvalCase;
+use crate::{Result, TraceEvalError};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ValidationProfile {
+    DraftCases,
+    RunnableCases,
+    EvaluationResults,
+    CalibrationDataset,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ValidationSeverity {
+    Error,
+    Warning,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ValidationReport {
     pub checked_cases: usize,
     pub checked_results: usize,
     pub errors: Vec<ValidationIssue>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<ValidationIssue>,
 }
 
 impl ValidationReport {
@@ -20,10 +39,26 @@ impl ValidationReport {
     pub fn error_count(&self) -> usize {
         self.errors.len()
     }
+
+    pub fn warning_count(&self) -> usize {
+        self.warnings.len()
+    }
+
+    pub fn ensure_valid(&self) -> Result<()> {
+        if self.is_valid() {
+            Ok(())
+        } else {
+            Err(TraceEvalError::ValidationFailed {
+                error_count: self.error_count(),
+                warning_count: self.warning_count(),
+            })
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ValidationIssue {
+    pub severity: ValidationSeverity,
     pub code: String,
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -37,18 +72,27 @@ pub struct ValidationReportBuilder {
     checked_cases: usize,
     checked_results: usize,
     errors: Vec<ValidationIssue>,
+    warnings: Vec<ValidationIssue>,
 }
 
 impl ValidationReportBuilder {
-    pub fn check_cases(mut self, cases: &[EvalCase]) -> Self {
+    pub fn check_cases(self, cases: &[EvalCase]) -> Self {
+        self.check_cases_with_profile(cases, ValidationProfile::RunnableCases)
+    }
+
+    pub fn check_cases_with_profile(
+        mut self,
+        cases: &[EvalCase],
+        profile: ValidationProfile,
+    ) -> Self {
         self.checked_cases += cases.len();
         let mut seen_case_ids = BTreeSet::<&str>::new();
 
         for case in cases {
             if case.id.trim().is_empty() {
-                self.push("missing_case_id", "case id is empty", None, None);
+                self.push_error("missing_case_id", "case id is empty", None, None);
             } else if !seen_case_ids.insert(case.id.as_str()) {
-                self.push(
+                self.push_error(
                     "duplicate_case_id",
                     "case id appears more than once",
                     Some(case.id.clone()),
@@ -57,7 +101,7 @@ impl ValidationReportBuilder {
             }
 
             if case.trace_id.trim().is_empty() {
-                self.push(
+                self.push_error(
                     "missing_trace_id",
                     "trace id is empty",
                     Some(case.id.clone()),
@@ -66,7 +110,7 @@ impl ValidationReportBuilder {
             }
 
             if case.input.trim().is_empty() {
-                self.push(
+                self.push_error(
                     "missing_input",
                     "case input is empty",
                     Some(case.id.clone()),
@@ -79,29 +123,48 @@ impl ValidationReportBuilder {
                 .as_deref()
                 .is_none_or(|output| output.trim().is_empty())
             {
-                self.push(
-                    "missing_actual_output",
-                    "case actual_output is missing or empty",
-                    Some(case.id.clone()),
-                    Some(case.trace_id.clone()),
-                );
+                match profile {
+                    ValidationProfile::DraftCases => self.push_warning(
+                        "missing_actual_output",
+                        "case actual_output is missing or empty",
+                        Some(case.id.clone()),
+                        Some(case.trace_id.clone()),
+                    ),
+                    ValidationProfile::RunnableCases | ValidationProfile::CalibrationDataset => {
+                        self.push_error(
+                            "missing_actual_output",
+                            "case actual_output is missing or empty",
+                            Some(case.id.clone()),
+                            Some(case.trace_id.clone()),
+                        );
+                    }
+                    ValidationProfile::EvaluationResults => {}
+                }
             }
         }
 
         self
     }
 
-    pub fn check_results(mut self, results: &[EvaluationResult]) -> Self {
+    pub fn check_results(self, results: &[EvaluationResult]) -> Self {
+        self.check_results_with_profile(results, ValidationProfile::EvaluationResults)
+    }
+
+    pub fn check_results_with_profile(
+        mut self,
+        results: &[EvaluationResult],
+        _profile: ValidationProfile,
+    ) -> Self {
         self.checked_results += results.len();
         let mut seen_result_keys = BTreeSet::<(&str, &str)>::new();
 
         for result in results {
             if result.case_id.trim().is_empty() {
-                self.push("missing_case_id", "result case_id is empty", None, None);
+                self.push_error("missing_case_id", "result case_id is empty", None, None);
             }
 
             if result.trace_id.trim().is_empty() {
-                self.push(
+                self.push_error(
                     "missing_trace_id",
                     "result trace_id is empty",
                     Some(result.case_id.clone()),
@@ -110,7 +173,7 @@ impl ValidationReportBuilder {
             }
 
             if result.evaluator_name.trim().is_empty() {
-                self.push(
+                self.push_error(
                     "missing_evaluator_name",
                     "result evaluator_name is empty",
                     Some(result.case_id.clone()),
@@ -119,7 +182,7 @@ impl ValidationReportBuilder {
             } else if !seen_result_keys
                 .insert((result.case_id.as_str(), result.evaluator_name.as_str()))
             {
-                self.push(
+                self.push_error(
                     "duplicate_result",
                     "case has more than one result for the same evaluator",
                     Some(result.case_id.clone()),
@@ -128,14 +191,14 @@ impl ValidationReportBuilder {
             }
 
             if !result.raw_score.is_finite() {
-                self.push(
+                self.push_error(
                     "invalid_raw_score",
                     "raw_score must be finite",
                     Some(result.case_id.clone()),
                     Some(result.trace_id.clone()),
                 );
             } else if !raw_score_in_scale(result.raw_score, result.score_scale) {
-                self.push(
+                self.push_error(
                     "invalid_raw_score",
                     "raw_score is outside its score_scale",
                     Some(result.case_id.clone()),
@@ -144,7 +207,7 @@ impl ValidationReportBuilder {
             }
 
             if !unit_interval(result.normalized_score) {
-                self.push(
+                self.push_error(
                     "invalid_normalized_score",
                     "normalized_score must be between 0.0 and 1.0",
                     Some(result.case_id.clone()),
@@ -156,7 +219,7 @@ impl ValidationReportBuilder {
                 .calibrated_score
                 .is_some_and(|score| !unit_interval(score))
             {
-                self.push(
+                self.push_error(
                     "invalid_calibrated_score",
                     "calibrated_score must be between 0.0 and 1.0",
                     Some(result.case_id.clone()),
@@ -176,7 +239,7 @@ impl ValidationReportBuilder {
 
         for result in results {
             if !case_ids.contains(result.case_id.as_str()) {
-                self.push(
+                self.push_error(
                     "unknown_result_case",
                     "result case_id is not present in cases",
                     Some(result.case_id.clone()),
@@ -193,28 +256,69 @@ impl ValidationReportBuilder {
             checked_cases: self.checked_cases,
             checked_results: self.checked_results,
             errors: self.errors,
+            warnings: self.warnings,
         }
     }
 
-    fn push(
+    fn push_error(
         &mut self,
         code: impl Into<String>,
         message: impl Into<String>,
         case_id: Option<String>,
         trace_id: Option<String>,
     ) {
-        self.errors.push(ValidationIssue {
+        self.push(ValidationSeverity::Error, code, message, case_id, trace_id);
+    }
+
+    fn push_warning(
+        &mut self,
+        code: impl Into<String>,
+        message: impl Into<String>,
+        case_id: Option<String>,
+        trace_id: Option<String>,
+    ) {
+        self.push(
+            ValidationSeverity::Warning,
+            code,
+            message,
+            case_id,
+            trace_id,
+        );
+    }
+
+    fn push(
+        &mut self,
+        severity: ValidationSeverity,
+        code: impl Into<String>,
+        message: impl Into<String>,
+        case_id: Option<String>,
+        trace_id: Option<String>,
+    ) {
+        let issue = ValidationIssue {
+            severity,
             code: code.into(),
             message: message.into(),
             case_id,
             trace_id,
-        });
+        };
+
+        match issue.severity {
+            ValidationSeverity::Error => self.errors.push(issue),
+            ValidationSeverity::Warning => self.warnings.push(issue),
+        }
     }
 }
 
 pub fn validate_cases(cases: &[EvalCase]) -> ValidationReport {
+    validate_cases_with_profile(cases, ValidationProfile::RunnableCases)
+}
+
+pub fn validate_cases_with_profile(
+    cases: &[EvalCase],
+    profile: ValidationProfile,
+) -> ValidationReport {
     ValidationReportBuilder::default()
-        .check_cases(cases)
+        .check_cases_with_profile(cases, profile)
         .finish()
 }
 
@@ -228,8 +332,16 @@ pub fn validate_cases_and_results(
     cases: &[EvalCase],
     results: &[EvaluationResult],
 ) -> ValidationReport {
+    validate_cases_and_results_with_profile(cases, results, ValidationProfile::RunnableCases)
+}
+
+pub fn validate_cases_and_results_with_profile(
+    cases: &[EvalCase],
+    results: &[EvaluationResult],
+    case_profile: ValidationProfile,
+) -> ValidationReport {
     ValidationReportBuilder::default()
-        .check_cases(cases)
+        .check_cases_with_profile(cases, case_profile)
         .check_results(results)
         .check_overlap(cases, results)
         .finish()
@@ -272,6 +384,31 @@ mod tests {
                 .iter()
                 .any(|issue| issue.code == "duplicate_case_id")
         );
+    }
+
+    #[test]
+    fn draft_cases_warn_but_do_not_fail_for_missing_actual_output() {
+        let cases = vec![EvalCase::new("case-1", "trace-1", "input")];
+
+        let report = validate_cases_with_profile(&cases, ValidationProfile::DraftCases);
+
+        assert!(report.is_valid());
+        assert_eq!(report.error_count(), 0);
+        assert_eq!(report.warning_count(), 1);
+        assert_eq!(report.warnings[0].severity, ValidationSeverity::Warning);
+        assert_eq!(report.warnings[0].code, "missing_actual_output");
+    }
+
+    #[test]
+    fn runnable_cases_fail_for_missing_actual_output() {
+        let cases = vec![EvalCase::new("case-1", "trace-1", "input")];
+
+        let report = validate_cases_with_profile(&cases, ValidationProfile::RunnableCases);
+
+        assert!(!report.is_valid());
+        assert_eq!(report.error_count(), 1);
+        assert_eq!(report.errors[0].severity, ValidationSeverity::Error);
+        assert_eq!(report.errors[0].code, "missing_actual_output");
     }
 
     #[test]

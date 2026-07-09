@@ -2,8 +2,10 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::Context;
 use serde::Serialize;
+
+use crate::Result;
 
 #[derive(Debug, Clone)]
 pub struct JsonlFile<P> {

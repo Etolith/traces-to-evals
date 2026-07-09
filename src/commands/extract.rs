@@ -13,5 +13,6 @@ pub fn run(args: ExtractArgs) -> Result<()> {
         ExtractFormat::OpenInference => OpenInferenceExtractor.extract_traces(&traces)?,
     };
 
-    JsonlFile::new(&args.out).write_all(&cases)
+    JsonlFile::new(&args.out).write_all(&cases)?;
+    Ok(())
 }

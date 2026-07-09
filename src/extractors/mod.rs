@@ -1,8 +1,7 @@
 pub mod openinference;
 pub mod simple;
 
-use anyhow::Result;
-
+use crate::Result;
 use crate::model::{EvalCase, Trace};
 
 pub trait EvalCaseExtractor {

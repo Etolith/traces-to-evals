@@ -1,7 +1,8 @@
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::Context;
 
+use crate::Result;
 use crate::model::EvalCase;
 
 #[derive(Debug, Default, Clone, Copy)]

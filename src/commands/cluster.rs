@@ -20,7 +20,8 @@ pub fn run(args: ClusterArgs) -> Result<()> {
         (Some(results_path), Some(out_path)) => {
             let results: Vec<EvaluationResult> = JsonlFile::new(results_path).read_all()?;
             let results = apply_assignments_to_results(results, &assignments);
-            JsonlFile::new(out_path).write_all(&results)
+            JsonlFile::new(out_path).write_all(&results)?;
+            Ok(())
         }
         (None, Some(_)) => Err(anyhow!("--results-out requires --results")),
         _ => Ok(()),

@@ -4,10 +4,10 @@ pub mod prompt;
 pub mod types;
 
 #[cfg(feature = "llm-judge-openai")]
-use anyhow::Result;
-#[cfg(feature = "llm-judge-openai")]
 use types::JudgeResult;
 
+#[cfg(feature = "llm-judge-openai")]
+use crate::Result;
 #[cfg(feature = "llm-judge-openai")]
 use crate::evaluation::AsyncEvaluator;
 #[cfg(feature = "llm-judge-openai")]

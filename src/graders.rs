@@ -1,8 +1,8 @@
-use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 
 use crate::evaluation::{EvaluationResult, Evaluator, ScoreScale};
 use crate::model::EvalCase;
+use crate::{Result, TraceEvalError};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GradeResult {
@@ -88,10 +88,12 @@ impl DeterministicGrader for NonEmptyOutputGrader {
     }
 
     fn grade(&self, case: &EvalCase) -> Result<GradeResult> {
-        let output = case
-            .actual_output
-            .as_deref()
-            .ok_or_else(|| anyhow!("case {} has no actual_output", case.id))?;
+        let output =
+            case.actual_output
+                .as_deref()
+                .ok_or_else(|| TraceEvalError::MissingActualOutput {
+                    case_id: case.id.clone(),
+                })?;
 
         if output.trim().is_empty() {
             Ok(GradeResult::fail(
@@ -118,14 +120,17 @@ impl DeterministicGrader for ExactMatchGrader {
     }
 
     fn grade(&self, case: &EvalCase) -> Result<GradeResult> {
-        let actual = case
-            .actual_output
-            .as_deref()
-            .ok_or_else(|| anyhow!("case {} has no actual_output", case.id))?;
-        let expected = case
-            .expected_output
-            .as_deref()
-            .ok_or_else(|| anyhow!("case {} has no expected_output", case.id))?;
+        let actual =
+            case.actual_output
+                .as_deref()
+                .ok_or_else(|| TraceEvalError::MissingActualOutput {
+                    case_id: case.id.clone(),
+                })?;
+        let expected = case.expected_output.as_deref().ok_or_else(|| {
+            TraceEvalError::MissingExpectedOutput {
+                case_id: case.id.clone(),
+            }
+        })?;
 
         if actual.trim() == expected.trim() {
             Ok(GradeResult::pass(
@@ -162,10 +167,12 @@ impl DeterministicGrader for ContainsGrader {
     }
 
     fn grade(&self, case: &EvalCase) -> Result<GradeResult> {
-        let actual = case
-            .actual_output
-            .as_deref()
-            .ok_or_else(|| anyhow!("case {} has no actual_output", case.id))?;
+        let actual =
+            case.actual_output
+                .as_deref()
+                .ok_or_else(|| TraceEvalError::MissingActualOutput {
+                    case_id: case.id.clone(),
+                })?;
 
         if actual.contains(&self.needle) {
             Ok(GradeResult::pass(

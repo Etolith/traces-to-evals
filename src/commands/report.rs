@@ -33,5 +33,6 @@ pub fn run(args: ReportArgs) -> Result<()> {
 
     let report = EvaluationReport::from_results_with_aggregate(&results, &aggregate);
 
-    JsonFile::new(args.out).write_pretty(&report)
+    JsonFile::new(args.out).write_pretty(&report)?;
+    Ok(())
 }

@@ -2,8 +2,10 @@ use std::fs::File;
 use std::io::{BufReader, BufWriter};
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::Context;
 use serde::{Serialize, de::DeserializeOwned};
+
+use crate::Result;
 
 #[derive(Debug, Clone)]
 pub struct JsonFile<P> {
@@ -27,8 +29,10 @@ where
         let file = File::open(self.path.as_ref())
             .with_context(|| format!("failed to open {}", self.path.as_ref().display()))?;
 
-        serde_json::from_reader(BufReader::new(file))
-            .with_context(|| format!("failed to parse {}", self.path.as_ref().display()))
+        let value = serde_json::from_reader(BufReader::new(file))
+            .with_context(|| format!("failed to parse {}", self.path.as_ref().display()))?;
+
+        Ok(value)
     }
 
     pub fn write_pretty<T>(&self, value: &T) -> Result<()>
@@ -39,6 +43,8 @@ where
             .with_context(|| format!("failed to create {}", self.path.as_ref().display()))?;
 
         serde_json::to_writer_pretty(BufWriter::new(file), value)
-            .with_context(|| format!("failed to write {}", self.path.as_ref().display()))
+            .with_context(|| format!("failed to write {}", self.path.as_ref().display()))?;
+
+        Ok(())
     }
 }

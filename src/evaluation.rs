@@ -1,9 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::Result;
 use crate::extractors::EvalCaseExtractor;
 use crate::model::{EvalCase, Trace};
 

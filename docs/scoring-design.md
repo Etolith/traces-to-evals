@@ -78,14 +78,13 @@ pub enum Command {
     Extract(ExtractArgs),
     Validate(ValidateArgs),
     Grade(GradeArgs),
-    Judge(JudgeArgs),
     Calibrate(CalibrateArgs),
     Cluster(ClusterArgs),
     Report(ReportArgs),
 }
 ```
 
-`judge` can remain as a compatibility alias for:
+LLM judging goes through the canonical `grade` command:
 
 ```bash
 traceeval grade --judge openai-dive ...
@@ -128,7 +127,7 @@ calibrated score:
   calibrated_score = probability-like 0.0..1.0 value derived from historical human labels
 ```
 
-`ScoredResult` remains as a compatibility alias. `GradeResult` and `JudgeResult` are still available for callers that need the raw grader/judge-specific records, but the composable path converts both into `EvaluationResult`:
+`EvaluationResult` is the canonical scored result type. `GradeResult` and `JudgeResult` are still available for callers that need the raw grader/judge-specific records, but the composable path converts both into `EvaluationResult`:
 
 ```rust
 impl From<GradeResult> for EvaluationResult
@@ -172,16 +171,7 @@ traceeval calibrate \
   --out historical_calibration.json
 ```
 
-The existing `calibrate_judge_results()` computes:
-
-```text
-exact_match_rate
-within_one_rate
-pass_agreement_rate
-mean_absolute_error
-```
-
-The next version should also produce a reusable calibration table:
+`CalibrationModel::fit()` produces a reusable calibration table from historical `EvaluationResult` rows and human ratings:
 
 ```rust
 pub struct CalibrationModel {
@@ -526,7 +516,7 @@ Phase 1: CLI and result unification
 - Add clap. Done.
 - Add traceeval grade. Done.
 - Add EvaluationResult. Done.
-- Keep ScoredResult as a compatibility alias. Done.
+- Remove pre-release scored-result aliases. Done.
 - Convert GradeResult and JudgeResult into EvaluationResult. Done.
 - Add EvaluationRun and weighted aggregation. Done.
 - Add traceeval report. Done.

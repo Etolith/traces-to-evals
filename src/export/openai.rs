@@ -1,8 +1,8 @@
 use std::path::Path;
 
-use anyhow::Result;
 use serde::Serialize;
 
+use crate::Result;
 use crate::io::jsonl::JsonlFile;
 use crate::model::EvalCase;
 

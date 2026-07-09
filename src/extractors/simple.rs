@@ -1,8 +1,8 @@
-use anyhow::{Result, anyhow};
 use serde_json::Value;
 
 use crate::extractors::EvalCaseExtractor;
 use crate::model::{EvalCase, Span, SpanKind, Trace};
+use crate::{Result, TraceEvalError};
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct SimpleExtractor;
@@ -29,7 +29,10 @@ fn trace_to_eval_case(trace: &Trace) -> Result<EvalCase> {
         .iter()
         .find(|span| span.kind == SpanKind::Llm && span.input.is_some())
         .or_else(|| trace.spans.iter().find(|span| span.input.is_some()))
-        .ok_or_else(|| anyhow!("trace {} does not contain span input", trace.id))?;
+        .ok_or_else(|| TraceEvalError::MissingTraceInput {
+            trace_id: trace.id.clone(),
+            extractor: "simple".to_string(),
+        })?;
 
     let output_span = trace
         .spans
@@ -49,7 +52,9 @@ fn build_eval_case(
     let input = input_span
         .input
         .clone()
-        .ok_or_else(|| anyhow!("span {} has no input", input_span.id))?;
+        .ok_or_else(|| TraceEvalError::MissingSpanInput {
+            span_id: input_span.id.clone(),
+        })?;
 
     let mut metadata = trace.metadata.clone();
     metadata.insert(
@@ -101,11 +106,12 @@ mod tests {
     fn requires_input_for_eval_case() {
         let trace = Trace::new("trace-1").with_span(Span::llm("span-1", "completion"));
 
-        let error = SimpleExtractor
-            .extract_trace(&trace)
-            .unwrap_err()
-            .to_string();
+        let error = SimpleExtractor.extract_trace(&trace).unwrap_err();
 
-        assert!(error.contains("does not contain span input"));
+        assert!(matches!(
+            error,
+            TraceEvalError::MissingTraceInput { trace_id, extractor }
+                if trace_id == "trace-1" && extractor == "simple"
+        ));
     }
 }

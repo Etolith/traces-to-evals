@@ -44,8 +44,6 @@ The OpenAI judge asks only for subjective judgment fields (`score`, `criteria`, 
 - `WeightedAggregate` computes weighted run scores by evaluator and cluster.
 - `HumanRating` captures historical human labels.
 - `CalibrationModel::fit()` learns score bins from previous `EvaluationResult` datasets and human ratings.
-- `calibrate_judge_results()` remains as a compatibility helper for raw `JudgeResult` values.
-- `ScoredResult` remains as a compatibility alias for `EvaluationResult`.
 
 **Export and I/O**
 
@@ -75,6 +73,7 @@ Validate cases or evaluation results:
 
 ```bash
 cargo run --bin traceeval -- validate \
+  --profile runnable-cases \
   --cases eval_cases.jsonl \
   --out validation.json
 ```
@@ -278,15 +277,15 @@ PromptfooExporter::write_json(path, &cases)?;
 EvalCaseCsvExporter::write(path, &cases)?;
 ```
 
-`src/exporters.rs` is only a compatibility namespace that re-exports these types. It should not grow new wrapper functions.
+Library APIs return `traces_to_evals::Result<T>` with `TraceEvalError` variants for common failures such as missing outputs, invalid scores, validation failures, and calibration overlap.
 
 ## Planned Work
 
-See [docs/missing.md](docs/missing.md) for remaining work and [docs/scoring-design.md](docs/scoring-design.md) for the scoring, calibration, clustering, and optional ML design.
+See [docs/api-and-product-roadmap.md](docs/api-and-product-roadmap.md) for API/product cleanup, [docs/missing.md](docs/missing.md) for remaining work, and [docs/scoring-design.md](docs/scoring-design.md) for the scoring, calibration, clustering, and optional ML design.
 
 Near-term implementation priorities:
 
-- add failed-case detail to reports
-- add validation profiles
 - add calibration mismatch warnings
 - revisit public API visibility
+- add Markdown report output
+- add real cluster discovery and LLM cluster labeling

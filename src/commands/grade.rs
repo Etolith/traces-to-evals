@@ -49,7 +49,8 @@ fn run_deterministic(args: GradeArgs) -> Result<()> {
         }
     };
 
-    JsonlFile::new(&args.out).write_all(run.results())
+    JsonlFile::new(&args.out).write_all(run.results())?;
+    Ok(())
 }
 
 #[cfg(feature = "llm-judge-openai")]
@@ -67,7 +68,8 @@ async fn run_judge(args: GradeArgs) -> Result<()> {
                 .evaluate_with_async(&judge)
                 .await?;
 
-            JsonlFile::new(&args.out).write_all(run.results())
+            JsonlFile::new(&args.out).write_all(run.results())?;
+            Ok(())
         }
         None => Err(anyhow!("missing --judge or --grader")),
     }

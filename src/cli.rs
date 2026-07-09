@@ -19,8 +19,6 @@ pub enum Command {
     Extract(ExtractArgs),
     /// Grade eval cases with a deterministic grader or judge provider.
     Grade(GradeArgs),
-    /// Compatibility alias for `grade --judge openai-dive`.
-    Judge(JudgeArgs),
     /// Validate eval cases and evaluation results.
     Validate(ValidateArgs),
     /// Fit a calibration model from historical results and human ratings.
@@ -67,22 +65,6 @@ pub struct GradeArgs {
 }
 
 #[derive(Debug, Clone, Args)]
-pub struct JudgeArgs {
-    /// Input eval cases JSONL file.
-    #[arg(long)]
-    pub cases: PathBuf,
-    /// Judge provider to run.
-    #[arg(long, value_enum)]
-    pub provider: JudgeProviderName,
-    /// Model name for judge providers.
-    #[arg(long)]
-    pub model: String,
-    /// Output judge results JSONL file.
-    #[arg(long)]
-    pub out: PathBuf,
-}
-
-#[derive(Debug, Clone, Args)]
 pub struct ValidateArgs {
     /// Input eval cases JSONL file.
     #[arg(long)]
@@ -90,6 +72,9 @@ pub struct ValidateArgs {
     /// Input evaluation results JSONL file.
     #[arg(long)]
     pub results: Option<PathBuf>,
+    /// Validation profile to apply.
+    #[arg(long, value_enum)]
+    pub profile: Option<ValidationProfileName>,
     /// Optional validation report JSON output file.
     #[arg(long)]
     pub out: Option<PathBuf>,
@@ -154,6 +139,14 @@ pub enum ExtractFormat {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ValidationProfileName {
+    DraftCases,
+    RunnableCases,
+    EvaluationResults,
+    CalibrationDataset,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum DeterministicGraderName {
     NonEmptyOutput,
     ExactMatch,
@@ -170,7 +163,6 @@ pub async fn run() -> Result<()> {
     match Cli::parse().command {
         Command::Extract(args) => commands::extract::run(args),
         Command::Grade(args) => commands::grade::run(args).await,
-        Command::Judge(args) => commands::judge::run(args).await,
         Command::Validate(args) => commands::validate::run(args),
         Command::Calibrate(args) => commands::calibrate::run(args),
         Command::Cluster(args) => commands::cluster::run(args),
@@ -183,7 +175,6 @@ pub fn run() -> Result<()> {
     match Cli::parse().command {
         Command::Extract(args) => commands::extract::run(args),
         Command::Grade(args) => commands::grade::run(args),
-        Command::Judge(args) => commands::judge::run(args),
         Command::Validate(args) => commands::validate::run(args),
         Command::Calibrate(args) => commands::calibrate::run(args),
         Command::Cluster(args) => commands::cluster::run(args),
@@ -198,13 +189,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_judge_alias_args() {
+    fn parses_judge_grader_args() {
         let cli = Cli::parse_from([
             "traceeval",
-            "judge",
+            "grade",
             "--cases",
             "cases.jsonl",
-            "--provider",
+            "--judge",
             "openai-dive",
             "--model",
             "gpt-4o",
@@ -212,13 +203,13 @@ mod tests {
             "out.jsonl",
         ]);
 
-        let Command::Judge(args) = cli.command else {
-            panic!("expected judge command");
+        let Command::Grade(args) = cli.command else {
+            panic!("expected grade command");
         };
 
         assert_eq!(args.cases, PathBuf::from("cases.jsonl"));
-        assert_eq!(args.provider, JudgeProviderName::OpenaiDive);
-        assert_eq!(args.model, "gpt-4o");
+        assert_eq!(args.judge, Some(JudgeProviderName::OpenaiDive));
+        assert_eq!(args.model.as_deref(), Some("gpt-4o"));
         assert_eq!(args.out, PathBuf::from("out.jsonl"));
     }
 
@@ -226,9 +217,9 @@ mod tests {
     fn rejects_missing_value_for_cases() {
         let result = Cli::try_parse_from([
             "traceeval",
-            "judge",
+            "grade",
             "--cases",
-            "--provider",
+            "--judge",
             "openai-dive",
             "--model",
             "gpt-4o",

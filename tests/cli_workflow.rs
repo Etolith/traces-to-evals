@@ -137,3 +137,59 @@ fn cli_validate_reports_fixture_case_errors() {
 
     assert!(codes.contains(&"missing_actual_output"));
 }
+
+#[test]
+fn cli_validate_draft_profile_allows_missing_actual_output_as_warning() {
+    let dir = tempdir().unwrap();
+    let validation = dir.path().join("validation.json");
+
+    assert_success(
+        traceeval()
+            .args(["validate", "--profile", "draft-cases", "--cases"])
+            .arg(repo_path("fixtures/eval/cases.jsonl"))
+            .args(["--out"])
+            .arg(&validation)
+            .output()
+            .unwrap(),
+    );
+
+    let report: Value =
+        serde_json::from_str(&std::fs::read_to_string(validation).unwrap()).unwrap();
+
+    assert_eq!(report["errors"].as_array().unwrap().len(), 0);
+    assert!(
+        report["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|issue| issue["code"] == "missing_actual_output"
+                && issue["severity"] == "warning")
+    );
+}
+
+#[test]
+fn cli_report_includes_failed_case_detail() {
+    let dir = tempdir().unwrap();
+    let report = dir.path().join("report.json");
+
+    assert_success(
+        traceeval()
+            .args(["report", "--results"])
+            .arg(repo_path("fixtures/eval/historical_results.jsonl"))
+            .args(["--clusters"])
+            .arg(repo_path("fixtures/eval/clusters.jsonl"))
+            .args(["--out"])
+            .arg(&report)
+            .output()
+            .unwrap(),
+    );
+
+    let report: Value = serde_json::from_str(&std::fs::read_to_string(report).unwrap()).unwrap();
+
+    assert_eq!(report["failed_cases"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        report["failed_cases"][0]["case_id"],
+        "case-missing-output-1"
+    );
+    assert_eq!(report["worst_clusters"][0]["cluster_id"], "arithmetic");
+}

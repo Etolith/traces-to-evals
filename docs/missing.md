@@ -2,6 +2,8 @@
 
 This document tracks what remains after the composability and CLI workflow implementation.
 
+For the detailed API/product cleanup plan, see [api-and-product-roadmap.md](api-and-product-roadmap.md).
+
 The crate now has a usable non-ML evaluation loop:
 
 ```text
@@ -37,7 +39,6 @@ CLI:
 
 - `traceeval extract`
 - `traceeval grade`
-- `traceeval judge`
 - `traceeval validate`
 - `traceeval calibrate`
 - `traceeval cluster`
@@ -64,13 +65,16 @@ There is no longer a blocking P0 item for a non-ML workflow. The crate can run t
 
 ## P1: Report Quality
 
-`EvaluationReport` explains overall, per-evaluator, and per-cluster scores, but it is still minimal.
+`EvaluationReport` now explains overall, per-evaluator, and per-cluster scores, failed cases, worst clusters, and calibration impact.
 
-Missing:
+Implemented:
 
 - List of failed cases.
 - Worst clusters sorted by score.
 - Score deltas before/after calibration.
+
+Missing:
+
 - Per-cluster case counts split by evaluator.
 - Human-readable Markdown report output.
 
@@ -89,13 +93,12 @@ pub struct FailedCase {
 
 ## P1: Public API Curation
 
-The library still exposes more structure than ideal.
+The library still exposes more structure than ideal, but compatibility aliases and compatibility namespaces have been removed before release.
 
 Current issue:
 
-- `cli` is public because the binary uses `traces_to_evals::cli::run()`.
-- `exporters` is a compatibility namespace.
-- Provider implementation details are still visible under `providers`.
+- `cli` is public because the binary uses `traces_to_evals::cli::run()`, but it is `#[doc(hidden)]`.
+- Provider implementation details are still public under `providers`, but hidden from generated docs.
 
 Target public shape:
 
@@ -117,9 +120,9 @@ pub mod prelude;
 
 Potential cleanup:
 
-- Move CLI execution into an internal binary-support module or keep `cli` public but mark it as binary API, not library API.
+- Move CLI execution into an internal binary-support module if we want to remove public `cli` entirely.
 - Keep `providers` public only if users need to inject provider clients.
-- Keep `exporters` for one release, then deprecate it if this becomes a published crate.
+- Keep the public API on canonical modules instead of adding pre-release compatibility shims.
 
 ## P1: Full Pipeline Builder
 
@@ -219,30 +222,43 @@ Do not add a general optimizer until binned calibration proves insufficient.
 
 ## P1: Validation Semantics
 
-Validation currently checks structural and score-range issues.
+Validation now supports profiles and warning severity.
+
+Implemented:
+
+- `DraftCases`
+- `RunnableCases`
+- `EvaluationResults`
+- `CalibrationDataset`
+- `ValidationSeverity::Error`
+- `ValidationSeverity::Warning`
+- CLI `traceeval validate --profile ...`
 
 Missing:
 
-- Optional validation profiles, because some export-only cases may not require `actual_output`.
 - Schema version checks.
-- Configurable severity: error vs warning.
 - Validation of calibration/report files.
+- Direct validation of human-rating files as part of calibration datasets.
 
 ## P2: Typed Errors
 
-The crate currently uses `anyhow::Result` broadly. That is acceptable while the API is changing, but a reusable library eventually needs typed errors for predictable caller behavior.
+The crate now exposes `traces_to_evals::Result<T>` and `TraceEvalError` for core library APIs. CLI command handlers still use `anyhow::Result` for command-specific context, and provider internals still use `anyhow` in a few places.
 
-Add typed errors for:
+Implemented typed categories include:
 
 - Invalid case data.
 - Missing required output.
 - Invalid score scale.
 - Calibration overlap failure.
 - Cluster assignment failure.
-- Provider failure.
+- Validation failure.
 - Export failure.
 
-This can be done with `thiserror` when the public API stabilizes.
+Remaining work:
+
+- Decide whether provider internals should map all errors into `TraceEvalError::Provider`.
+- Review variant names and payloads before a stable release.
+- Add more branch-on-error tests for `io`, `export`, and OpenAI judge paths.
 
 ## P2: ML Feature Layer
 
@@ -275,8 +291,7 @@ Before publishing or asking users to depend on this crate, define what is stable
 
 Needed:
 
-- Decide whether `GradeResult` and `JudgeResult` are compatibility types or long-term domain types.
-- Decide whether `ScoredResult` remains as an alias or is removed before release.
+- Decide whether `GradeResult` and `JudgeResult` are long-term domain types or internal conversion records.
 - Decide whether serialized JSON fields are stable.
 - Add changelog entries for schema-affecting changes.
 

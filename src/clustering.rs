@@ -2,10 +2,10 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
-use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::Result;
 use crate::evaluation::EvaluationResult;
 use crate::model::EvalCase;
 
@@ -213,12 +213,6 @@ pub struct RuleBasedClusterAssigner {
     rules: Vec<Arc<dyn ClusterAssignmentRule>>,
     fallback_cluster_id: String,
 }
-
-#[deprecated(note = "use ClusterAssigner")]
-pub use ClusterAssigner as Clusterer;
-
-#[deprecated(note = "use RuleBasedClusterAssigner")]
-pub type MetadataClusterer = RuleBasedClusterAssigner;
 
 impl RuleBasedClusterAssigner {
     pub fn new(clusters: Vec<EvalCluster>) -> Self {
