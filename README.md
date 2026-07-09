@@ -2,6 +2,11 @@
 
 `traces-to-evals` turns GenAI execution traces into reusable evaluation cases, then evaluates, calibrates, aggregates, or exports those cases.
 
+The repository binary is currently named `traceeval`; downstream projects can
+rename the binary or wrap it without changing parser code. Persisted cluster
+artifacts also support a custom namespace through `ProjectName`, so generated
+schema versions do not have to use the default `traceeval.*` prefix.
+
 The crate is organized around a composable evaluation pipeline:
 
 - model traces as `Trace`, `Span`, and `EvalCase`
@@ -288,4 +293,4 @@ Near-term implementation priorities:
 - add calibration mismatch warnings
 - revisit public API visibility
 - add Markdown report output
-- add real cluster discovery and LLM cluster labeling
+- add local embeddings and non-K-Means discovery options

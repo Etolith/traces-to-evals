@@ -35,6 +35,64 @@ EvalCase rows
 - No hidden network calls in `ClusterDiscovery`; networked embedding and labeling providers stay explicit.
 - No compatibility aliases before the first release.
 
+## Project Namespace
+
+`traceeval` is the default CLI/example name and the default artifact namespace,
+not a value that should be baked into every implementation point.
+
+Generated versioned artifacts use a project namespace:
+
+```rust
+pub struct ProjectName(String);
+
+impl ProjectName {
+    pub fn new(name: impl Into<String>) -> Result<Self>;
+    pub fn case_embedding_schema_version(&self) -> String;
+    pub fn cluster_model_schema_version(&self) -> String;
+    pub fn cluster_text_projection_version(&self, include_output: bool) -> String;
+}
+```
+
+Default artifact versions are:
+
+- `traceeval.case_embedding.v1`
+- `traceeval.cluster_model.v1`
+- `traceeval.cluster_text.v1`
+
+Callers can override the namespace when generating artifacts:
+
+```rust
+let project = ProjectName::new("acme-evals")?;
+let projector = DefaultClusterTextProjector::new().with_project_name(project.clone());
+let projected = projector.project_case(&case);
+let embedding = CaseEmbedding::new_with_project(
+    &project,
+    &projected,
+    "provider",
+    "model",
+    vector,
+    projector.projection_version(),
+);
+let model = ClusterModel::new_with_project(
+    &project,
+    "model-1",
+    created_at,
+    source,
+    clusters,
+    assignments,
+    quality,
+);
+```
+
+Validation must accept any valid project namespace while still enforcing the
+artifact kind and schema version. For example, both
+`traceeval.case_embedding.v1` and `acme-evals.case_embedding.v1` are valid case
+embedding schemas; `acme-evals.case_embedding.v2` is not valid for v1 readers.
+
+The clap command name must not be hardcoded in the parser. The installed binary
+or wrapper script owns the command name shown to users; docs use `traceeval` as
+the current repository binary.
+
 ## Implementation Status
 
 Implemented in the default crate:
@@ -45,21 +103,22 @@ Implemented in the default crate:
 - Added SHA-256 projected text hashes for embedding rows.
 - Added `ClusterModel`, `DiscoveredCluster`, `ClusterModelSource`, `ClusterLabel`, and cluster quality structs.
 - Added `EmbeddingProvider`, `ClusterDiscovery`, `ClusterLabeler`, and `EmbeddingClusterAssigner` traits.
+- Added `ProjectName` so schema/projection namespaces can be overridden without editing every type.
 - Added `ClusterModelAssigner` for brute-force nearest-centroid assignment.
 - Added validation profiles and library checks for embeddings, cluster models, and cluster assignments.
 - Added `traceeval validate` inputs for `--embeddings`, `--cluster-model`, and `--assignments`.
 - Added `traceeval cluster assign` for rule-based assignment and discovered-model nearest-centroid assignment.
-- Added `traceeval cluster embed`, `traceeval cluster discover`, and `traceeval cluster label` CLI contracts with explicit pending-backend errors.
-- Added `embeddings-openai` and `cluster-label-openai` feature flags. Their provider implementations are still pending.
+- Added `traceeval cluster discover --algorithm kmeans` behind `clustering-linfa`; it writes `ClusterModel`, assignment JSONL, and report-compatible cluster JSONL artifacts.
+- Added `traceeval cluster embed --provider openai` behind `embeddings-openai`; it writes valid `CaseEmbedding` JSONL.
+- Added `traceeval cluster label --provider openai` behind `cluster-label-openai`; it writes a labeled `ClusterModel` and report-compatible cluster JSONL.
+- Added `clustering-linfa` with `linfa`, `linfa-clustering`, `ndarray`, and seeded `rand`.
+- Added `embeddings-openai` and `cluster-label-openai` feature flags. The OpenAI embedding provider and OpenAI cluster labeler are implemented.
+- Added report enrichment for exported cluster labels/descriptions, novelty/unclustered counts, and failed-case cluster confidence.
 
-Not implemented yet:
+Future optional work:
 
-- OpenAI or local embedding providers.
-- The `clustering-linfa` feature flag and dependency set.
-- K-Means discovery with `linfa-clustering`.
-- OpenAI cluster labeling provider.
-- Functional backends for `traceeval cluster embed`, `traceeval cluster discover`, and `traceeval cluster label`.
-- Cluster model report enrichment beyond assigned `cluster_id` metadata.
+- Local embedding provider.
+- DBSCAN/HDBSCAN-style discovery.
 - ANN/vector database assignment backends.
 
 ## Module Shape
@@ -148,7 +207,7 @@ into deterministic text.
 
 ```rust
 pub trait ClusterTextProjector {
-    fn projection_version(&self) -> &'static str;
+    fn projection_version(&self) -> String;
     fn project_case(&self, case: &EvalCase) -> ClusterText;
 }
 
@@ -165,7 +224,8 @@ pub struct ProjectedField {
 }
 ```
 
-Default projection version: `traceeval.cluster_text.v1`.
+Default projection version: `traceeval.cluster_text.v1`. With a custom
+`ProjectName`, this becomes `{project}.cluster_text.v1`.
 
 Default included fields, in order:
 
@@ -245,7 +305,7 @@ pub struct CaseEmbedding {
 
 Required JSONL schema values:
 
-- `schema_version`: `traceeval.case_embedding.v1`
+- `schema_version`: `{project}.case_embedding.v1`; default is `traceeval.case_embedding.v1`
 - `dimensions`: must equal `vector.len()`
 - `text_hash`: lowercase hex SHA-256 of projected text bytes
 
@@ -273,6 +333,7 @@ pub struct ClusterDiscoveryInput<'a> {
 
 pub struct ClusterDiscoveryOptions {
     pub model_id: Option<String>,
+    pub project_name: ProjectName,
     pub algorithm: ClusterAlgorithm,
     pub distance_metric: DistanceMetric,
     pub representative_count: usize,
@@ -379,7 +440,7 @@ pub struct DiscoveredCluster {
 
 Required schema values:
 
-- `schema_version`: `traceeval.cluster_model.v1`
+- `schema_version`: `{project}.cluster_model.v1`; default is `traceeval.cluster_model.v1`
 - `model_id`: caller-provided or generated as `cluster-model-{unix_seconds}`
 - cluster ids: `cluster-0001`, `cluster-0002`, sorted by descending size unless labels are manually edited later
 
@@ -477,12 +538,15 @@ Structured output payload:
 pub struct ClusterLabelPayload {
     pub label: String,
     pub description: String,
-    pub suggested_rubric: Option<String>,
+    pub suggested_rubric: String,
     pub known_failure_modes: Vec<String>,
     pub confidence: f32,
     pub needs_review: bool,
 }
 ```
+
+`suggested_rubric` is an empty string when the model has no useful rubric
+suggestion; conversion into `ClusterLabel` trims it into `None`.
 
 Prompt inputs:
 
@@ -574,6 +638,8 @@ traceeval cluster embed \
   --cases historical_eval_cases.jsonl \
   --provider openai \
   --model text-embedding-3-small \
+  --dimensions 512 \
+  --project-name acme-evals \
   --out historical_embeddings.jsonl
 ```
 
@@ -586,6 +652,7 @@ traceeval cluster discover \
   --algorithm kmeans \
   --k 12 \
   --representatives 5 \
+  --project-name acme-evals \
   --out-model cluster_model.json \
   --out-assignments cluster_assignments.jsonl \
   --out-clusters clusters.jsonl
@@ -633,14 +700,15 @@ default = []
 llm-judge-openai = ["openai_dive", "schemars", "tokio"]
 embeddings-openai = ["openai_dive", "tokio"]
 embeddings-local = ["fastembed"]
-clustering-linfa = ["linfa", "linfa-clustering", "ndarray"]
+clustering-linfa = ["linfa", "linfa-clustering", "ndarray", "rand"]
 cluster-label-openai = ["openai_dive", "schemars", "tokio"]
 ann-hnsw = ["hnsw_rs"]
 
 [dependencies]
 linfa = { version = "0.8", optional = true }
 linfa-clustering = { version = "0.8", optional = true }
-ndarray = { version = "0.17", optional = true }
+ndarray = { version = "0.16", optional = true }
+rand = { version = "0.8", features = ["small_rng"], optional = true }
 fastembed = { version = "5", optional = true }
 hnsw_rs = { version = "0.3", optional = true }
 ```
@@ -714,11 +782,16 @@ pub struct ClusterScore {
     pub description: Option<String>,
     pub score: RunScore,
 }
+
+pub struct FailedCase {
+    pub cluster_label: Option<String>,
+    pub cluster_confidence: Option<f32>,
+}
 ```
 
 Report rules:
 
-- Use cluster labels from `ClusterModel` or exported `EvalCluster` rows when available.
+- Use cluster labels from exported `EvalCluster` rows when available.
 - Include novelty/unclustered counts.
 - Include worst clusters using weighted score.
 - Include failed cases with cluster label and assignment confidence when available.
@@ -757,10 +830,13 @@ Minimum test matrix before implementation is considered complete:
 11. Integrate discovered labels/confidence into reports.
 12. Benchmark assignment; add ANN only if brute-force centroid search is insufficient.
 
-Steps 1 through 5 and step 8 are implemented in the default crate. Step 10 is
-partially implemented: `cluster assign` is functional, and `embed`, `discover`,
-and `label` parse as stable command contracts but return pending-backend errors
-until the provider implementations are added.
+Steps 1 through 5 and step 8 are implemented in the default crate. Step 6 is
+implemented behind `embeddings-openai`. Step 7 is implemented behind
+`clustering-linfa`. Step 9 is implemented behind `cluster-label-openai`. Step
+10 is implemented for OpenAI embeddings, K-Means discovery, OpenAI labeling,
+and rule/model assignment. Step 11 is implemented for exported `EvalCluster`
+rows and assignment metadata. Step 12 remains future work and should be driven
+by benchmark evidence.
 
 ## Done Definition
 

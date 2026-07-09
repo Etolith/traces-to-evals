@@ -131,15 +131,17 @@ fn public_api_composes_trace_extraction_evaluation_calibration_and_aggregation()
 
 #[test]
 fn public_api_composes_cluster_discovery_primitives() -> Result<()> {
+    let project = ProjectName::new("acme-evals")?;
     let case = EvalCase::new("case-1", "trace-1", "reset my password")
         .with_expected_output("Use the reset link")
         .with_actual_output("irrelevant output for projection");
 
-    let projector = DefaultClusterTextProjector::new();
+    let projector = DefaultClusterTextProjector::new().with_project_name(project.clone());
     let projected = projector.project_case(&case);
     assert!(!projected.text.contains("actual_output"));
 
-    let embedding = CaseEmbedding::new(
+    let embedding = CaseEmbedding::new_with_project(
+        &project,
         &projected,
         "test-provider",
         "test-model",
@@ -147,6 +149,7 @@ fn public_api_composes_cluster_discovery_primitives() -> Result<()> {
         projector.projection_version(),
     );
     embedding.validate()?;
+    assert_eq!(embedding.schema_version, "acme-evals.case_embedding.v1");
 
     let cluster = DiscoveredCluster::new("cluster-0001", 1, vec![case.id.clone()])
         .with_centroid(vec![1.0, 0.0]);
@@ -157,7 +160,8 @@ fn public_api_composes_cluster_discovery_primitives() -> Result<()> {
         silhouette_score: None,
         clusters: vec![cluster.quality.clone()],
     };
-    let model = ClusterModel::new(
+    let model = ClusterModel::new_with_project(
+        &project,
         "model-1",
         "2026-01-01T00:00:00Z",
         ClusterModelSource {
@@ -165,7 +169,7 @@ fn public_api_composes_cluster_discovery_primitives() -> Result<()> {
             embedding_provider: Some("test-provider".to_string()),
             embedding_model: Some("test-model".to_string()),
             embedding_dimensions: Some(2),
-            projection_version: Some(projector.projection_version().to_string()),
+            projection_version: Some(projector.projection_version()),
             algorithm: "manual".to_string(),
             distance_metric: "cosine".to_string(),
             random_seed: 42,
@@ -175,6 +179,7 @@ fn public_api_composes_cluster_discovery_primitives() -> Result<()> {
         quality,
     );
     model.validate()?;
+    assert_eq!(model.schema_version, "acme-evals.cluster_model.v1");
 
     let assignment =
         ClusterModelAssigner::new(model).assign_case_embedding(&case, &embedding.vector)?;

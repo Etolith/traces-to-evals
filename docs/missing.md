@@ -147,7 +147,7 @@ This should now be feasible because report and cluster assignment APIs exist. It
 
 Authoritative spec: [cluster-discovery.md](cluster-discovery.md).
 
-The current implementation is rule-based assignment to an existing cluster taxonomy. It is not data-driven clustering.
+The default implementation is rule-based assignment to an existing cluster taxonomy. Data-driven discovery is available only behind `clustering-linfa`.
 
 Implemented:
 
@@ -160,16 +160,15 @@ Implemented:
 - Brute-force nearest-centroid assignment from a manually constructed `ClusterModel`.
 - `EmbeddingProvider`, `ClusterDiscovery`, `ClusterLabeler`, and embedding-aware assignment traits.
 - `traceeval cluster assign` for rule-based assignment and discovered-model nearest-centroid assignment.
-- CLI contracts for `cluster embed`, `cluster discover`, and `cluster label` with explicit pending-backend errors.
+- `traceeval cluster discover --algorithm kmeans` behind `clustering-linfa`.
+- `traceeval cluster embed --provider openai` behind `embeddings-openai`.
+- `traceeval cluster label --provider openai` behind `cluster-label-openai`.
+- Report enrichment from exported cluster labels and assignment confidence.
 
 Missing:
 
-- A real `ClusterDiscovery` implementation that fits clusters from cases and embeddings.
-- A `ClusterModel` produced automatically from feature vectors or embeddings.
-- A real `ClusterLabeler` implementation for naming and describing discovered clusters.
-- Cluster quality metrics beyond schema support.
-- Optional embedding provider and ML-backed implementations.
-- Functional backends behind `cluster embed`, `cluster discover`, and `cluster label`.
+- Local embedding provider.
+- DBSCAN/HDBSCAN-style discovery.
 
 Keep these responsibilities separate:
 
@@ -263,7 +262,7 @@ Recommended order:
 2. Add a separate discovery trait.
 3. Add embedding generation.
 4. Add local nearest-centroid assignment.
-5. Add K-Means or HDBSCAN-style clustering.
+5. Add K-Means or HDBSCAN-style clustering. K-Means is available behind `clustering-linfa`.
 6. Add approximate nearest-neighbor index or vector database.
 
 Do not add a broad ML dependency until the non-ML assignment API is stable.

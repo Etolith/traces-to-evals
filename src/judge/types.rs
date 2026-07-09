@@ -71,12 +71,22 @@ impl JudgePayload {
 #[cfg(feature = "llm-judge-openai")]
 impl JudgePayload {
     pub fn response_schema() -> anyhow::Result<ResponseSchema> {
-        Ok(ResponseSchema {
-            name: "trace_eval_judge_result".to_string(),
-            description: Some("Judgment result for one trace-derived evaluation case.".to_string()),
-            schema: OpenAiSchema::for_type::<Self>()?,
-            strict: true,
-        })
+        let mut response_schema = ResponseSchema::strict_json::<Self>(
+            "trace_eval_judge_result",
+            "Judgment result for one trace-derived evaluation case.",
+        )?;
+        Self::constrain_judge_score(&mut response_schema.schema);
+        Ok(response_schema)
+    }
+
+    fn constrain_judge_score(schema: &mut Value) {
+        if let Some(score) = schema
+            .pointer_mut("/properties/score")
+            .and_then(Value::as_object_mut)
+        {
+            score.insert("minimum".to_string(), Value::from(JudgePayload::MIN_SCORE));
+            score.insert("maximum".to_string(), Value::from(JudgePayload::MAX_SCORE));
+        }
     }
 }
 
@@ -92,52 +102,6 @@ impl From<JudgeResult> for EvaluationResult {
             result.evaluation,
         )
         .with_criteria(result.criteria)
-    }
-}
-
-#[cfg(feature = "llm-judge-openai")]
-struct OpenAiSchema;
-
-#[cfg(feature = "llm-judge-openai")]
-impl OpenAiSchema {
-    fn for_type<T>() -> anyhow::Result<Value>
-    where
-        T: schemars::JsonSchema,
-    {
-        let mut schema = serde_json::to_value(schemars::schema_for!(T))?;
-        Self::normalize(&mut schema);
-        Self::constrain_judge_score(&mut schema);
-        Ok(schema)
-    }
-
-    fn normalize(schema: &mut Value) {
-        match schema {
-            Value::Object(object) => {
-                object.remove("$schema");
-                object.remove("title");
-                object.remove("format");
-
-                for value in object.values_mut() {
-                    Self::normalize(value);
-                }
-            }
-            Value::Array(values) => {
-                for value in values {
-                    Self::normalize(value);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    fn constrain_judge_score(schema: &mut Value) {
-        if let Some(score) = schema
-            .pointer_mut("/properties/score")
-            .and_then(Value::as_object_mut)
-        {
-            score.insert("minimum".to_string(), Value::from(JudgePayload::MIN_SCORE));
-            score.insert("maximum".to_string(), Value::from(JudgePayload::MAX_SCORE));
-        }
     }
 }
 

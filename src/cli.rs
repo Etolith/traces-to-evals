@@ -6,7 +6,6 @@ use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 use crate::commands;
 
 #[derive(Debug, Parser)]
-#[command(name = "traceeval")]
 #[command(about = "Turn traces into eval cases and score them")]
 pub struct Cli {
     #[command(subcommand)]
@@ -167,6 +166,12 @@ pub struct ClusterEmbedArgs {
     /// Embedding model name.
     #[arg(long)]
     pub model: String,
+    /// Optional embedding dimensions override for providers that support it.
+    #[arg(long)]
+    pub dimensions: Option<u32>,
+    /// Project namespace for generated artifact schema versions.
+    #[arg(long = "project-name")]
+    pub project_name: Option<String>,
     /// Output case embeddings JSONL file.
     #[arg(long)]
     pub out: PathBuf,
@@ -189,6 +194,9 @@ pub struct ClusterDiscoverArgs {
     /// Representative examples per discovered cluster.
     #[arg(long, default_value_t = 5)]
     pub representatives: usize,
+    /// Project namespace for generated artifact schema versions.
+    #[arg(long = "project-name")]
+    pub project_name: Option<String>,
     /// Output discovered cluster model JSON file.
     #[arg(long = "out-model")]
     pub out_model: PathBuf,
@@ -284,19 +292,45 @@ pub enum ClusterAlgorithmName {
     Dbscan,
 }
 
-#[cfg(feature = "llm-judge-openai")]
+#[cfg(any(
+    feature = "llm-judge-openai",
+    feature = "embeddings-openai",
+    feature = "cluster-label-openai"
+))]
 pub async fn run() -> Result<()> {
     match Cli::parse().command {
         Command::Extract(args) => commands::extract::run(args),
-        Command::Grade(args) => commands::grade::run(args).await,
+        Command::Grade(args) => {
+            #[cfg(feature = "llm-judge-openai")]
+            {
+                commands::grade::run(args).await
+            }
+            #[cfg(not(feature = "llm-judge-openai"))]
+            {
+                commands::grade::run(args)
+            }
+        }
         Command::Validate(args) => commands::validate::run(args),
         Command::Calibrate(args) => commands::calibrate::run(args),
-        Command::Cluster(args) => commands::cluster::run(args),
+        Command::Cluster(args) => {
+            #[cfg(any(feature = "embeddings-openai", feature = "cluster-label-openai"))]
+            {
+                commands::cluster::run(args).await
+            }
+            #[cfg(not(any(feature = "embeddings-openai", feature = "cluster-label-openai")))]
+            {
+                commands::cluster::run(args)
+            }
+        }
         Command::Report(args) => commands::report::run(args),
     }
 }
 
-#[cfg(not(feature = "llm-judge-openai"))]
+#[cfg(not(any(
+    feature = "llm-judge-openai",
+    feature = "embeddings-openai",
+    feature = "cluster-label-openai"
+)))]
 pub fn run() -> Result<()> {
     match Cli::parse().command {
         Command::Extract(args) => commands::extract::run(args),
@@ -398,5 +432,40 @@ mod tests {
         ]);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn parses_cluster_embed_project_and_dimensions_args() {
+        let cli = Cli::parse_from([
+            "traceeval",
+            "cluster",
+            "embed",
+            "--cases",
+            "cases.jsonl",
+            "--provider",
+            "openai",
+            "--model",
+            "text-embedding-3-small",
+            "--dimensions",
+            "512",
+            "--project-name",
+            "acme-evals",
+            "--out",
+            "embeddings.jsonl",
+        ]);
+
+        let Command::Cluster(cluster_args) = cli.command else {
+            panic!("expected cluster command");
+        };
+        let ClusterCommand::Embed(args) = cluster_args.command else {
+            panic!("expected cluster embed command");
+        };
+
+        assert_eq!(args.cases, PathBuf::from("cases.jsonl"));
+        assert_eq!(args.provider, ClusterEmbeddingProviderName::Openai);
+        assert_eq!(args.model, "text-embedding-3-small");
+        assert_eq!(args.dimensions, Some(512));
+        assert_eq!(args.project_name.as_deref(), Some("acme-evals"));
+        assert_eq!(args.out, PathBuf::from("embeddings.jsonl"));
     }
 }

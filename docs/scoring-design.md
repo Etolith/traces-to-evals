@@ -218,7 +218,7 @@ Authoritative cluster discovery spec: [cluster-discovery.md](cluster-discovery.m
 
 Clustering should select context and thresholds. It should not be the grader.
 
-The current crate implements rule-based assignment to a known cluster taxonomy. True cluster discovery is a separate future feature.
+The default crate implements rule-based assignment to a known cluster taxonomy. K-Means discovery from embeddings is available behind `clustering-linfa`.
 
 LLMs should usually be used after discovery to label and explain clusters, not as the primary clustering algorithm. A typical future flow is:
 
@@ -257,6 +257,7 @@ traceeval cluster embed \
   --cases historical_eval_cases.jsonl \
   --provider openai \
   --model text-embedding-3-small \
+  --dimensions 512 \
   --out historical_embeddings.jsonl
 ```
 
@@ -324,7 +325,7 @@ cli = ["clap"]
 llm-judge-openai = ["openai_dive", "schemars", "tokio"]
 embeddings-openai = ["openai_dive", "tokio"]
 embeddings-local = ["fastembed"]
-clustering-linfa = ["linfa", "linfa-clustering", "ndarray"]
+clustering-linfa = ["linfa", "linfa-clustering", "ndarray", "rand"]
 cluster-label-openai = ["openai_dive", "schemars", "tokio"]
 ann-hnsw = ["hnsw_rs"]
 
@@ -332,9 +333,10 @@ ann-hnsw = ["hnsw_rs"]
 clap = { version = "4", features = ["derive"], optional = true }
 linfa = { version = "0.8", optional = true }
 linfa-clustering = { version = "0.8", optional = true }
-ndarray = { version = "0.17", optional = true }
-fastembed = { version = "5", optional = true }
+ndarray = { version = "0.16", optional = true }
 hnsw_rs = { version = "0.3", optional = true }
+rand = { version = "0.8", features = ["small_rng"], optional = true }
+fastembed = { version = "5", optional = true }
 ```
 
 Recommended order:
@@ -347,7 +349,7 @@ Recommended order:
    Implement score bins directly.
 
 3. embeddings-openai
-   Reuse openai_dive to generate embeddings for EvalCase input/rubric/tool summary.
+   Reuse openai_dive to generate embeddings for EvalCase input/rubric/tool summary. Done.
 
 4. clustering-linfa
    Add linfa-clustering + ndarray for K-Means first.
@@ -526,7 +528,7 @@ Phase 3: cluster assignment without ML
 Phase 4: embeddings and ML clustering
 
 ```text
-- Add embeddings-openai.
+- Add embeddings-openai. Done.
 - Add embedding JSONL format.
 - Add brute-force nearest-cluster assignment by cosine similarity.
 - Add linfa-clustering K-Means.

@@ -19,19 +19,18 @@ pub fn run(args: ReportArgs) -> Result<()> {
             .collect();
     }
 
-    let aggregate = match args.clusters {
-        Some(path) => {
-            let clusters: Vec<EvalCluster> = JsonlFile::new(path).read_all()?;
-            clusters
-                .into_iter()
-                .fold(WeightedAggregate::new(), |aggregate, cluster| {
-                    aggregate.with_cluster_weight(cluster.id, cluster.weight)
-                })
-        }
-        None => WeightedAggregate::default(),
+    let clusters = match args.clusters {
+        Some(path) => JsonlFile::new(path).read_all::<EvalCluster>()?,
+        None => Vec::new(),
     };
+    let aggregate = clusters
+        .iter()
+        .fold(WeightedAggregate::new(), |aggregate, cluster| {
+            aggregate.with_cluster_weight(cluster.id.clone(), cluster.weight)
+        });
 
-    let report = EvaluationReport::from_results_with_aggregate(&results, &aggregate);
+    let report =
+        EvaluationReport::from_results_with_aggregate_and_clusters(&results, &aggregate, &clusters);
 
     JsonFile::new(args.out).write_pretty(&report)?;
     Ok(())

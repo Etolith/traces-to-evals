@@ -48,6 +48,9 @@ pub enum TraceEvalError {
     #[error("cluster model {model_id} is invalid: {message}")]
     ClusterModelValidation { model_id: String, message: String },
 
+    #[error("invalid project name {name:?}: {message}")]
+    InvalidProjectName { name: String, message: String },
+
     #[error("validation failed with {error_count} errors and {warning_count} warnings")]
     ValidationFailed {
         error_count: usize,

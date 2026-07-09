@@ -264,9 +264,8 @@ Authoritative spec: [cluster-discovery.md](cluster-discovery.md).
 Current issue:
 
 - Current clustering support is rule-based assignment into known clusters.
-- It now has default-build cluster discovery schemas, projection, validation, and nearest-centroid assignment from a manually constructed `ClusterModel`.
-- It still does not fit/discover new clusters from embeddings.
-- LLM-based cluster naming is specified but not implemented.
+- It now has default-build cluster discovery schemas, projection, validation, nearest-centroid assignment from `ClusterModel`, OpenAI embeddings, K-Means discovery, OpenAI cluster labeling, and report enrichment from exported cluster labels.
+- DBSCAN/HDBSCAN-style discovery and local embeddings are still future work.
 
 The specified architecture stays split:
 
@@ -290,7 +289,7 @@ Recommended feature flags:
 ```toml
 embeddings-openai = ["openai_dive", "tokio"]
 embeddings-local = ["fastembed"]
-clustering-linfa = ["linfa", "linfa-clustering", "ndarray"]
+clustering-linfa = ["linfa", "linfa-clustering", "ndarray", "rand"]
 cluster-label-openai = ["openai_dive", "schemars", "tokio"]
 ```
 
@@ -298,10 +297,10 @@ Implementation contract:
 
 - Add `CaseEmbedding`, `ClusterModel`, `DiscoveredCluster`, `ClusterLabel`, and quality types. Done.
 - Add validation profiles for embedding datasets, cluster models, and cluster assignments. Done for library and `traceeval validate` inputs.
-- Add `ClusterTextProjector`, `EmbeddingProvider`, `ClusterDiscovery`, `ClusterLabeler`, and embedding-aware assignment APIs. Done for traits and nearest-centroid assignment; provider implementations do not exist yet.
-- Add CLI subcommands: `cluster embed`, `cluster discover`, `cluster label`, and expanded `cluster assign`. Done for the command contracts; only `cluster assign` has a functional backend today.
-- Add K-Means with `linfa-clustering` first; DBSCAN/HDBSCAN-style work is later.
-- Add OpenAI embeddings and OpenAI cluster labeling only behind feature flags.
+- Add `ClusterTextProjector`, `EmbeddingProvider`, `ClusterDiscovery`, `ClusterLabeler`, and embedding-aware assignment APIs. Done for traits, OpenAI embeddings, OpenAI labeling, and nearest-centroid assignment.
+- Add CLI subcommands: `cluster embed`, `cluster discover`, `cluster label`, and expanded `cluster assign`. Done for rule/model assignment, OpenAI `cluster embed`, K-Means `cluster discover`, and OpenAI `cluster label` behind feature flags.
+- Add K-Means with `linfa-clustering` first; DBSCAN/HDBSCAN-style work is later. Done for K-Means behind `clustering-linfa`.
+- Add OpenAI embeddings and OpenAI cluster labeling only behind feature flags. Done.
 
 Acceptance criteria:
 

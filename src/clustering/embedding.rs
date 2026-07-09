@@ -5,12 +5,11 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use crate::model::EvalCase;
+use crate::project::ProjectName;
 use crate::{Result, TraceEvalError};
 
-pub const CASE_EMBEDDING_SCHEMA_VERSION: &str = "traceeval.case_embedding.v1";
-pub const DEFAULT_CLUSTER_TEXT_PROJECTION_VERSION: &str = "traceeval.cluster_text.v1";
-pub const INCLUDE_OUTPUT_CLUSTER_TEXT_PROJECTION_VERSION: &str =
-    "traceeval.cluster_text.v1.include_output";
+pub const CASE_EMBEDDING_SCHEMA_KIND: &str = "case_embedding";
+pub const CLUSTER_TEXT_PROJECTION_KIND: &str = "cluster_text";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectedField {
@@ -27,7 +26,7 @@ pub struct ClusterText {
 }
 
 pub trait ClusterTextProjector {
-    fn projection_version(&self) -> &'static str;
+    fn projection_version(&self) -> String;
     fn project_case(&self, case: &EvalCase) -> ClusterText;
 }
 
@@ -35,12 +34,14 @@ pub trait ClusterTextProjector {
 pub struct DefaultClusterTextProjector {
     include_actual_output: bool,
     metadata_keys: Vec<&'static str>,
+    project_name: ProjectName,
 }
 
 impl Default for DefaultClusterTextProjector {
     fn default() -> Self {
         Self {
             include_actual_output: false,
+            project_name: ProjectName::default(),
             metadata_keys: vec![
                 "route",
                 "task",
@@ -66,6 +67,16 @@ impl DefaultClusterTextProjector {
         self
     }
 
+    pub fn with_project_name(mut self, project_name: ProjectName) -> Self {
+        self.project_name = project_name;
+        self
+    }
+
+    pub fn try_with_project_name(mut self, project_name: impl Into<String>) -> Result<Self> {
+        self.project_name = ProjectName::new(project_name)?;
+        Ok(self)
+    }
+
     pub fn with_metadata_key(mut self, key: &'static str) -> Self {
         if !self.metadata_keys.contains(&key) {
             self.metadata_keys.push(key);
@@ -75,12 +86,9 @@ impl DefaultClusterTextProjector {
 }
 
 impl ClusterTextProjector for DefaultClusterTextProjector {
-    fn projection_version(&self) -> &'static str {
-        if self.include_actual_output {
-            INCLUDE_OUTPUT_CLUSTER_TEXT_PROJECTION_VERSION
-        } else {
-            DEFAULT_CLUSTER_TEXT_PROJECTION_VERSION
-        }
+    fn projection_version(&self) -> String {
+        self.project_name
+            .cluster_text_projection_version(self.include_actual_output)
     }
 
     fn project_case(&self, case: &EvalCase) -> ClusterText {
@@ -137,8 +145,26 @@ impl CaseEmbedding {
         vector: Vec<f32>,
         projection_version: impl Into<String>,
     ) -> Self {
+        Self::new_with_project(
+            &ProjectName::default(),
+            projected,
+            provider,
+            model,
+            vector,
+            projection_version,
+        )
+    }
+
+    pub fn new_with_project(
+        project_name: &ProjectName,
+        projected: &ClusterText,
+        provider: impl Into<String>,
+        model: impl Into<String>,
+        vector: Vec<f32>,
+        projection_version: impl Into<String>,
+    ) -> Self {
         Self {
-            schema_version: CASE_EMBEDDING_SCHEMA_VERSION.to_string(),
+            schema_version: project_name.case_embedding_schema_version(),
             case_id: projected.case_id.clone(),
             trace_id: projected.trace_id.clone(),
             provider: provider.into(),
@@ -152,7 +178,8 @@ impl CaseEmbedding {
     }
 
     pub fn validate(&self) -> Result<()> {
-        if self.schema_version != CASE_EMBEDDING_SCHEMA_VERSION {
+        if !ProjectName::matches_schema_version(&self.schema_version, CASE_EMBEDDING_SCHEMA_KIND, 1)
+        {
             return Err(TraceEvalError::InvalidEmbedding {
                 case_id: self.case_id.clone(),
                 message: format!("unsupported schema_version {}", self.schema_version),
@@ -192,6 +219,19 @@ pub trait EmbeddingProvider: Send + Sync {
     where
         P: ClusterTextProjector + Send + Sync,
     {
+        self.embed_cases_with_project(&ProjectName::default(), projector, cases)
+            .await
+    }
+
+    async fn embed_cases_with_project<P>(
+        &self,
+        project_name: &ProjectName,
+        projector: &P,
+        cases: &[EvalCase],
+    ) -> Result<Vec<CaseEmbedding>>
+    where
+        P: ClusterTextProjector + Send + Sync,
+    {
         let projected = cases
             .iter()
             .map(|case| projector.project_case(case))
@@ -217,7 +257,8 @@ pub trait EmbeddingProvider: Send + Sync {
             .iter()
             .zip(vectors)
             .map(|(projection, vector)| {
-                let embedding = CaseEmbedding::new(
+                let embedding = CaseEmbedding::new_with_project(
+                    project_name,
                     projection,
                     self.provider_name(),
                     self.model_name(),
@@ -343,5 +384,26 @@ mod tests {
 
         let embedding = CaseEmbedding::new(&projected, "test", "model", vec![f32::NAN], "p");
         assert!(embedding.validate().is_err());
+    }
+
+    #[test]
+    fn custom_project_name_scopes_projection_and_embedding_schema() {
+        let project = ProjectName::new("acme-evals").unwrap();
+        let projector = DefaultClusterTextProjector::new().with_project_name(project.clone());
+        let projected = projector.project_case(&EvalCase::new("case-1", "trace-1", "input"));
+
+        assert_eq!(projector.projection_version(), "acme-evals.cluster_text.v1");
+
+        let embedding = CaseEmbedding::new_with_project(
+            &project,
+            &projected,
+            "test",
+            "model",
+            vec![0.1],
+            projector.projection_version(),
+        );
+
+        assert_eq!(embedding.schema_version, "acme-evals.case_embedding.v1");
+        assert!(embedding.validate().is_ok());
     }
 }
