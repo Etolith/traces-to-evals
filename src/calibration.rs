@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
@@ -49,7 +49,7 @@ pub fn calibrate_judge_results(
     let judge_by_case = judge_results
         .iter()
         .map(|result| (result.case_id.as_str(), result))
-        .collect::<BTreeMap<_, _>>();
+        .collect::<HashMap<_, _>>();
 
     let mut compared = 0usize;
     let mut exact_matches = 0usize;

@@ -1,4 +1,10 @@
+use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "llm-judge-openai")]
+use serde_json::Value;
+
+#[cfg(feature = "llm-judge-openai")]
+use crate::providers::chat::ResponseSchema;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JudgeResult {
@@ -12,20 +18,125 @@ pub struct JudgeResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "llm-judge-openai", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct JudgePayload {
+    /// Concise explanation of the score. This must not contain hidden chain-of-thought.
     pub evaluation: String,
+    /// 1=bad, 2=weak, 3=good, 4=excellent.
     pub score: u8,
     pub criteria: JudgeCriteria,
 }
 
+impl JudgePayload {
+    pub const MIN_SCORE: u8 = 1;
+    pub const MAX_SCORE: u8 = 4;
+
+    pub fn into_result(
+        self,
+        case_id: impl Into<String>,
+        trace_id: impl Into<String>,
+        judge_name: impl Into<String>,
+        pass_threshold: u8,
+    ) -> Result<JudgeResult> {
+        Self::validate_score(self.score)?;
+        Self::validate_score(pass_threshold)?;
+
+        Ok(JudgeResult {
+            case_id: case_id.into(),
+            trace_id: trace_id.into(),
+            judge_name: judge_name.into(),
+            score: self.score,
+            passed: self.score >= pass_threshold,
+            evaluation: self.evaluation,
+            criteria: self.criteria,
+        })
+    }
+
+    pub fn validate_score(score: u8) -> Result<()> {
+        if (Self::MIN_SCORE..=Self::MAX_SCORE).contains(&score) {
+            Ok(())
+        } else {
+            Err(anyhow!(
+                "judge score must be between {} and {}, got {}",
+                Self::MIN_SCORE,
+                Self::MAX_SCORE,
+                score
+            ))
+        }
+    }
+}
+
+#[cfg(feature = "llm-judge-openai")]
+impl JudgePayload {
+    pub fn response_schema() -> anyhow::Result<ResponseSchema> {
+        Ok(ResponseSchema {
+            name: "trace_eval_judge_result".to_string(),
+            description: Some("Judgment result for one trace-derived evaluation case.".to_string()),
+            schema: OpenAiSchema::for_type::<Self>()?,
+            strict: true,
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "llm-judge-openai", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct JudgeCriteria {
+    /// The answer directly addresses the user's request.
     pub relevance: bool,
+    /// The answer is factually and procedurally correct.
     pub correctness: bool,
+    /// The answer covers the important requirements of the request.
     pub completeness: bool,
+    /// The answer avoids unsafe, unauthorized, or policy-violating content.
     pub safety: bool,
+}
+
+#[cfg(feature = "llm-judge-openai")]
+struct OpenAiSchema;
+
+#[cfg(feature = "llm-judge-openai")]
+impl OpenAiSchema {
+    fn for_type<T>() -> anyhow::Result<Value>
+    where
+        T: schemars::JsonSchema,
+    {
+        let mut schema = serde_json::to_value(schemars::schema_for!(T))?;
+        Self::normalize(&mut schema);
+        Self::constrain_judge_score(&mut schema);
+        Ok(schema)
+    }
+
+    fn normalize(schema: &mut Value) {
+        match schema {
+            Value::Object(object) => {
+                object.remove("$schema");
+                object.remove("title");
+                object.remove("format");
+
+                for value in object.values_mut() {
+                    Self::normalize(value);
+                }
+            }
+            Value::Array(values) => {
+                for value in values {
+                    Self::normalize(value);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn constrain_judge_score(schema: &mut Value) {
+        if let Some(score) = schema
+            .pointer_mut("/properties/score")
+            .and_then(Value::as_object_mut)
+        {
+            score.insert("minimum".to_string(), Value::from(JudgePayload::MIN_SCORE));
+            score.insert("maximum".to_string(), Value::from(JudgePayload::MAX_SCORE));
+        }
+    }
 }
 
 #[cfg(test)]
@@ -47,5 +158,24 @@ mod tests {
         }"#;
 
         assert!(serde_json::from_str::<JudgePayload>(json).is_err());
+    }
+
+    #[test]
+    fn score_validation_enforces_scale() {
+        assert!(JudgePayload::validate_score(1).is_ok());
+        assert!(JudgePayload::validate_score(4).is_ok());
+        assert!(JudgePayload::validate_score(0).is_err());
+        assert!(JudgePayload::validate_score(5).is_err());
+    }
+
+    #[cfg(feature = "llm-judge-openai")]
+    #[test]
+    fn response_schema_is_generated_from_payload_type_and_constrained() {
+        let schema = JudgePayload::response_schema().unwrap().schema;
+
+        assert_eq!(schema["additionalProperties"], false);
+        assert_eq!(schema["properties"]["score"]["minimum"], 1);
+        assert_eq!(schema["properties"]["score"]["maximum"], 4);
+        assert!(schema.get("$schema").is_none());
     }
 }

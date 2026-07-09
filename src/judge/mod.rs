@@ -1,7 +1,7 @@
-pub mod types;
-
 #[cfg(feature = "llm-judge-openai")]
-pub mod openai_dive_judge;
+pub mod openai;
+pub mod prompt;
+pub mod types;
 
 #[cfg(feature = "llm-judge-openai")]
 use anyhow::Result;
