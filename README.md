@@ -36,8 +36,12 @@ The crate is organized around a composable evaluation pipeline:
 - `OpenInferenceBehaviorNormalizer` converts trace spans into versioned `AgentBehaviorTrace` records with bounded tool, approval, state-change, policy, and final-outcome facts.
 - `DeterministicDetectorSet` detects terminal and repeated tool failures, call loops, uncertain mutations, false success claims, approval bypasses, policy violations, excessive tool usage, unresolved escalations, and missing resolutions.
 - Recovery analysis suppresses a terminal failure when an idempotent retry, verified state, safe escalation, or accurate failure response resolves it.
+- Operation effect, retry safety, requiredness, and final claims come from structured telemetry or a versioned `BehaviorAdapterConfig`; the kernel does not infer them from tool names or assistant prose.
 - Finding IDs and failure signatures are deterministic SHA-256 identities. Error messages are represented by hashes rather than copied into findings.
 - `FindingEvalCandidateGenerator` creates reviewable `candidate` records; it never promotes generated behavior into an accepted eval suite.
+- `DetectionRunner` processes one trace at a time through async source/sink traits, skips completed finding IDs, and checkpoints only after durable finding writes and event side effects complete.
+- `SemanticBehaviorDetector` optionally evaluates a bounded behavior projection with a model, validates every cited evidence key, and merges failed or abstained judgments into the same finding/evidence/candidate path.
+- Structured-only judgments, failures below the configured confidence threshold, and model abstentions are informational `semantic_review_required` findings rather than actionable defects. A specific semantic failure kind and severity requires explicitly pre-redacted summaries and the confidence threshold. All semantic findings retain `requires_human_review=true`.
 
 **Graders and judges**
 
@@ -88,10 +92,56 @@ Normalize agent behavior and detect deterministic findings:
 cargo run --bin traceeval -- detect \
   --format openinference \
   --traces fixtures/behavior/traces.jsonl \
+  --adapter-config fixtures/behavior/adapter.json \
   --normalized-out agent_behavior.jsonl \
   --out behavior_findings.jsonl \
-  --candidates-out eval_candidates.jsonl
+  --candidates-out eval_candidates.jsonl \
+  --evidence-packet-out evidence_packet.json \
+  --projections-out finding_projections.jsonl \
+  --projection-cases-out finding_projection_cases.jsonl \
+  --signature-groups-out signature_groups.jsonl \
+  --projection-metadata-key fixture
 ```
+
+Add evidence-grounded semantic judging to the same detection run:
+
+```bash
+cargo run --features llm-judge-openai --bin traceeval -- detect \
+  --format openinference \
+  --traces fixtures/behavior/traces.jsonl \
+  --adapter-config fixtures/behavior/adapter.json \
+  --semantic-judge openai-dive \
+  --semantic-model <openai-chat-model> \
+  --semantic-results-out semantic_results.jsonl \
+  --semantic-projections-out semantic_projections.jsonl \
+  --out combined_findings.jsonl
+```
+
+The default `--semantic-content structured-only` projection excludes user and
+assistant summaries, arbitrary trace metadata, raw tool arguments/results,
+error messages, and state payloads. It contains only bounded tool, approval,
+policy, state-observation, and final-outcome facts. Invalid free-form semantic
+labels are replaced by hashes. To evaluate response quality, callers may use
+`--semantic-content pre-redacted-summaries`, but only after redacting those
+summaries upstream; the flag is an explicit attestation, not a redactor.
+
+The semantic evaluator returns `pass`, `fail`, or `abstain`, a 1-4 score,
+confidence, criteria, and evidence keys. Failed judgments must cite keys that
+exist in the projection. The OpenAI adapter downgrades unsupported citations to
+a zero-confidence review-only abstention; custom evaluators fail validation.
+Only thresholded failures evaluated with explicitly pre-redacted summaries
+retain the model-proposed bounded failure kind and severity. Structured-only
+judgments, low-confidence failures, and abstentions become informational review
+findings by default; use
+`--semantic-ignore-abstentions` to omit abstention findings. Model explanations
+are stored in the optional evaluation-results artifact, while immutable
+findings keep only its content hash and structured provenance.
+
+Use `--semantic-rubric-file` with `--semantic-rubric-version` for a versioned
+application rubric and `--semantic-min-confidence` to configure the actionable
+failure threshold. Semantic result rows contain an evaluator specification hash
+and can be passed to paired remediation verification alongside deterministic
+grader results after the relevant review policy accepts them.
 
 The local CLI accepts threshold overrides such as `--max-repeated-failures`,
 `--max-equivalent-calls`, `--max-tool-calls`, and
@@ -100,15 +150,168 @@ source finding/evidence provenance. Cross-trace importance scoring, issue
 aggregation, storage, sandboxes, deployments, and approval policy remain
 platform responsibilities.
 
+Semantic projections include only fixed finding fields and explicitly
+allowlisted metadata. They are deterministically ordered, size-bounded,
+versioned, hashed, and always exclude common tenant, deployment, revision, and
+credential fields. Library callers can supply a `FindingRedactor` before any
+projected value is sent to an embedding provider.
+`--projection-cases-out` wraps only the safe projected text as `EvalCase`
+records, allowing the existing `cluster embed`, `cluster discover`, and
+assignment paths to perform semantic grouping without receiving raw traces.
+
+`KnownSignatureGrouper` provides deterministic local grouping by the existing
+mechanical `failure_signature` and deduplicates repeated delivery of the same
+`finding_id`. It does not assign business impact, materialize issues, or manage
+issue lifecycle state.
+
+Evidence packets contain sorted scoped references, detector/adapter versions,
+and explicit telemetry gaps, with deterministic packet and content hashes.
+Generated candidates link to that packet, hash their proposed definition, and
+must pass the typed review transition before becoming accepted; changing the
+proposed expected behavior invalidates the definition hash.
+
+Candidate generation does not copy the normalized trace input by default,
+because a bounded input summary is not automatically a redacted fixture.
+Library callers may explicitly attach a `RedactedCandidateInput` containing a
+synthetic or redacted summary, its redaction-policy version, and an evidence
+reference. That input and its provenance are included in the candidate
+definition hash.
+
 The normalizer uses explicit structured evidence when present. Supported
 adapter attributes include `agent.tool.status`, `agent.operation`,
-`agent.mutation`, `agent.idempotent`, `agent.tool.required`,
+`agent.operation.effect`, `agent.operation.retry_safety`,
+`agent.tool.requirement`,
 `agent.approval.required`, `agent.approval.outcome`,
-`agent.policy.outcome`, `agent.final.status`,
-`agent.final.claimed_success`, and escalation/resolution flags. It also reads
-the existing OpenInference and OpenTelemetry GenAI names used by the fintech
-demo, including `openinference.span.kind`, `gen_ai.tool.name`,
-`gen_ai.tool.call.id`, `approval_required`, and bounded `state_delta` values.
+`agent.state.predicate`, `agent.state.observation`,
+`agent.policy.outcome`, `agent.final.status`, `agent.outcome.claims`, and
+`agent.escalation.status`. It also reads OpenInference and OpenTelemetry GenAI
+names such as `openinference.span.kind`, `gen_ai.tool.name`, and
+`gen_ai.tool.call.id`. A bounded `state_delta` becomes a referenced artifact;
+its private payload is not copied into findings and does not imply verified
+success.
+
+Verify that a paired candidate run removes an incident signature and introduces
+no severe novel finding:
+
+```bash
+cargo run --bin traceeval -- verify-findings \
+  --case-id incident-case \
+  --baseline baseline-findings.jsonl \
+  --candidate candidate-findings.jsonl \
+  --target-signature sha256:... \
+  --out finding-verification.json
+```
+
+This is the deterministic finding gate only. To combine every offline Stage 10
+gate, create a versioned request such as:
+
+```json
+{
+  "schema_version": "traceeval.remediation_verification_request.v1",
+  "case_id": "incident-case",
+  "target_failure_signatures": ["sha256:..."],
+  "incident_case_id": "incident-case",
+  "suite_case_ids": ["accepted-case-1"],
+  "severe_threshold": "high",
+  "policy_gate": {
+    "status": "passed",
+    "evidence": [{"kind": "policy_report", "identity": "sha256:..."}]
+  },
+  "approval_gate": {
+    "status": "passed",
+    "evidence": [{"kind": "approval_record", "identity": "approval:..."}]
+  },
+  "baseline_budget": {
+    "tool_call_count": 4,
+    "latency_ms": 1200,
+    "cost_microunits": 300
+  },
+  "candidate_budget": {
+    "tool_call_count": 4,
+    "latency_ms": 1150,
+    "cost_microunits": 290
+  },
+  "policy": {
+    "max_new_suite_failures": 0,
+    "max_suite_score_drop": 0.0,
+    "max_tool_call_increase": 0,
+    "max_latency_increase_ms": 0,
+    "max_cost_increase_microunits": 0
+  }
+}
+```
+
+Then run:
+
+```bash
+cargo run --bin traceeval -- verify-remediation \
+  --request remediation-request.json \
+  --baseline-findings baseline-findings.jsonl \
+  --candidate-findings candidate-findings.jsonl \
+  --baseline-results baseline-results.jsonl \
+  --candidate-results candidate-results.jsonl \
+  --out remediation-verification.json
+```
+
+The combined verifier requires exact case/evaluator/version pairing, a result
+for every declared suite case, valid non-duplicate result records, evidence-backed
+policy and approval gates, bounded score regressions, and bounded tool-call,
+latency, and cost increases. Evaluation rows must include either
+`metadata.evaluator_spec_hash` or `metadata.evaluator_version`. Changed evaluator
+versions are reported as an unpaired baseline result plus an unexpected
+candidate result; aggregate pass rate cannot conceal a per-case regression.
+The CLI binds the report and verification ID to SHA-256 digests plus byte and
+record counts for all four findings/results files. A request may predeclare
+`input_artifacts`; if it does, the command rejects any digest mismatch.
+The report is written even when a gate fails, and the command then exits
+non-zero.
+
+Passing offline remediation verification authorizes no rollout and does not
+close an issue. Canary deployment, production proof, promotion, rollback, and
+issue lifecycle remain platform responsibilities.
+
+`FindingRecurrenceComparator` compares affected-trace rates for baseline and
+canary windows, reports recurrence deltas/ratios and severe novel findings, and
+records whether each window is exact or sampled. Sampled reports explicitly
+forbid interpreting observed rates as exact customer prevalence; Karura retains
+promotion and rollback policy.
+
+The same comparison is available to a rollout controller through the CLI:
+
+```json
+{
+  "schema_version": "traceeval.finding_recurrence_request.v1",
+  "target_failure_signatures": ["sha256:..."],
+  "baseline_window": {
+    "window_id": "stable-2026-07-10T10:00Z",
+    "observed_trace_count": 1000,
+    "population_basis": "sampled"
+  },
+  "candidate_window": {
+    "window_id": "canary-2026-07-10T10:00Z",
+    "observed_trace_count": 120,
+    "population_basis": "sampled"
+  },
+  "severe_threshold": "high"
+}
+```
+
+```bash
+cargo run --bin traceeval -- compare-recurrence \
+  --request recurrence-request.json \
+  --baseline-findings stable-findings.jsonl \
+  --candidate-findings canary-findings.jsonl \
+  --out recurrence-comparison.json
+```
+
+The comparison rejects conflicting duplicate finding records and windows with
+more affected traces than observed traces. Its content identity includes the
+window counts, population basis, severity threshold, targets, and finding IDs.
+It also reports affected-trace rates for every finding kind, so rollout policy
+can separately inspect tool failures, false-success findings, and policy
+violations. Zero-observation or unknown-population windows produce explicit
+evidence gaps and an instruction to pause; the comparator never emits a
+promotion or rollback decision.
 
 Validate cases or evaluation results:
 
