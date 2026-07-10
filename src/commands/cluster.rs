@@ -12,7 +12,8 @@ use crate::clustering::{
     CaseEmbedding, ClusterAlgorithm, ClusterAssigner, ClusterAssignment, ClusterDiscovery,
     ClusterDiscoveryInput, ClusterDiscoveryOptions, ClusterModel, ClusterModelAssigner,
     DistanceMetric, EmbeddingClusterAssigner, EvalCluster, KMeansClusterDiscovery,
-    RuleBasedClusterAssigner, apply_assignments_to_results,
+    KeywordAssignmentRule, MetadataAssignmentRule, RuleBasedClusterAssigner,
+    apply_assignments_to_results,
 };
 #[cfg(feature = "cluster-label-openai")]
 use crate::clustering::{ClusterLabeler, OpenAiClusterLabeler};
@@ -23,6 +24,10 @@ use crate::io::json::JsonFile;
 use crate::io::jsonl::JsonlFile;
 use crate::model::EvalCase;
 use crate::project::ProjectName;
+
+mod index;
+
+use index::{assign_with_vector_index, build_index};
 
 #[cfg(any(feature = "embeddings-openai", feature = "cluster-label-openai"))]
 pub async fn run(args: ClusterArgs) -> Result<()> {
@@ -37,6 +42,7 @@ pub async fn run(args: ClusterArgs) -> Result<()> {
         ClusterCommand::Label(args) => label(args).await,
         #[cfg(not(feature = "cluster-label-openai"))]
         ClusterCommand::Label(args) => label(args),
+        ClusterCommand::Index(args) => build_index(args),
     }
 }
 
@@ -47,6 +53,7 @@ pub fn run(args: ClusterArgs) -> Result<()> {
         ClusterCommand::Embed(args) => embed(args),
         ClusterCommand::Discover(args) => discover(args),
         ClusterCommand::Label(args) => label(args),
+        ClusterCommand::Index(args) => build_index(args),
     }
 }
 
@@ -55,7 +62,15 @@ fn assign(args: ClusterAssignArgs) -> Result<()> {
     let assignments = match (args.clusters.as_ref(), args.model.as_ref()) {
         (Some(clusters_path), None) => {
             let clusters: Vec<EvalCluster> = JsonlFile::new(clusters_path).read_all()?;
-            let assigner = RuleBasedClusterAssigner::new(clusters);
+            let metadata_rule = args
+                .metadata_keys
+                .iter()
+                .fold(MetadataAssignmentRule::new(), |rule, key| {
+                    rule.with_metadata_key(key)
+                });
+            let assigner = RuleBasedClusterAssigner::empty(clusters)
+                .with_rule(metadata_rule)
+                .with_rule(KeywordAssignmentRule::new());
             assigner.assign_cases(&cases)?
         }
         (None, Some(model_path)) => {
@@ -65,11 +80,15 @@ fn assign(args: ClusterAssignArgs) -> Result<()> {
                 .as_ref()
                 .ok_or_else(|| anyhow!("--model assignment requires --embeddings"))?;
             let embeddings: Vec<CaseEmbedding> = JsonlFile::new(embeddings_path).read_all()?;
-            let mut assigner = ClusterModelAssigner::new(model);
-            if let Some(threshold) = args.novelty_distance_threshold {
-                assigner = assigner.with_novelty_distance_threshold(threshold);
+            if let Some(backend) = args.vector_index {
+                assign_with_vector_index(&args, backend, model, &cases, &embeddings)?
+            } else {
+                let mut assigner = ClusterModelAssigner::new(model);
+                if let Some(threshold) = args.novelty_distance_threshold {
+                    assigner = assigner.with_novelty_distance_threshold(threshold);
+                }
+                assigner.assign_case_embeddings(&cases, &embeddings)?
             }
-            assigner.assign_case_embeddings(&cases, &embeddings)?
         }
         _ => {
             return Err(anyhow!(

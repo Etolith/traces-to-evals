@@ -294,7 +294,8 @@ Start with three assignment modes:
 
 ```text
 exact-tag:
-  Use case metadata like task_id, route, product area, or scenario tag.
+  Use explicit cluster metadata by default. Application fields such as route,
+  product area, or scenario tag must be selected by the caller.
 
 lexical:
   Use normalized input tokens, tool names, and rubric text.
@@ -327,16 +328,17 @@ embeddings-openai = ["openai_dive", "tokio"]
 embeddings-local = ["fastembed"]
 clustering-linfa = ["linfa", "linfa-clustering", "ndarray", "rand"]
 cluster-label-openai = ["openai_dive", "schemars", "tokio"]
-ann-hnsw = ["hnsw_rs"]
+ann-paimon = ["paimon-vindex-core", "roaring"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"], optional = true }
 linfa = { version = "0.8", optional = true }
 linfa-clustering = { version = "0.8", optional = true }
 ndarray = { version = "0.16", optional = true }
-hnsw_rs = { version = "0.3", optional = true }
 rand = { version = "0.8", features = ["small_rng"], optional = true }
 fastembed = { version = "5", optional = true }
+paimon-vindex-core = { git = "https://github.com/apache/paimon-vector-index", rev = "93753f7dc8fea0402f7a5c8ee9f080168b553219", package = "paimon-vindex-core", optional = true }
+roaring = { version = "0.11", optional = true }
 ```
 
 Recommended order:
@@ -357,8 +359,10 @@ Recommended order:
 5. cluster-label-openai
    Add OpenAI labels after discovered clusters and representatives exist.
 
-6. ann-hnsw
-   Add only when brute-force centroid search is too slow.
+6. ann-paimon
+   Add only when brute-force centroid search is too slow or case-level
+   nearest-neighbor search is required. See vector-index.md for the backend
+   trait and Paimon adapter design.
 
 7. embeddings-local
    Add fastembed only when offline/local embedding generation is a product requirement.
@@ -382,8 +386,9 @@ ndarray:
 fastembed:
   Local ONNX-based embeddings. Useful for offline mode, but adds model download/cache/runtime concerns.
 
-hnsw_rs:
-  Local approximate nearest-neighbor index when in-memory brute force is too slow.
+paimon-vindex-core:
+  Optional Paimon-backed vector index when in-memory brute force is too slow or
+  persisted nearest-neighbor search is required.
 
 qdrant-client:
   Persistent vector database integration for service deployments.
@@ -537,7 +542,7 @@ Phase 4: embeddings and ML clustering
 Phase 5: scale and production options
 
 ```text
-- Add hnsw_rs for local ANN.
+- Add ann-paimon for optional vector-index-backed assignment.
 - Add qdrant-client for persistent vector search.
 - Add fastembed for local/offline embeddings if required.
 ```
@@ -587,5 +592,5 @@ Tests should prove:
 - `linfa-clustering`: https://docs.rs/linfa-clustering/latest/linfa_clustering/
 - `ndarray`: https://docs.rs/ndarray/latest/ndarray/
 - `fastembed`: https://docs.rs/fastembed/latest/fastembed/
-- `hnsw_rs`: https://docs.rs/hnsw_rs/latest/hnsw_rs/
+- Apache Paimon Vector Index: https://github.com/apache/paimon-vector-index
 - `qdrant-client`: https://docs.rs/qdrant-client/latest/qdrant_client/

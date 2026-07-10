@@ -151,7 +151,8 @@ The default implementation is rule-based assignment to an existing cluster taxon
 
 Implemented:
 
-- Exact assignment from metadata fields such as `cluster_id`.
+- Exact assignment from cluster metadata fields such as `cluster_id`, with
+  caller-selected application fields available through `--metadata-key`.
 - Keyword/lexical fallback against provided cluster definitions.
 - `unclustered` fallback for unknown cases.
 - Versioned cluster discovery schema types.
@@ -253,8 +254,12 @@ embeddings-openai = [...]
 embeddings-local = [...]
 clustering-linfa = [...]
 cluster-label-openai = [...]
-ann-hnsw = [...]
+ann-paimon = [...]
 ```
+
+The preferred ANN design is now the backend-neutral trait in
+[vector-index.md](vector-index.md), with Paimon behind an optional
+`ann-paimon` feature.
 
 Recommended order:
 

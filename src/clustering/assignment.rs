@@ -126,6 +126,11 @@ pub trait ClusterAssigner {
     }
 }
 
+/// Assigns cases by matching metadata values against known cluster IDs, labels, or tags.
+///
+/// The default rule only reads cluster-oriented keys: `cluster_id`, `cluster`,
+/// `task_cluster`, and the `tags` array. Application-specific keys must be added
+/// explicitly with [`MetadataAssignmentRule::with_metadata_key`].
 #[derive(Debug, Clone)]
 pub struct MetadataAssignmentRule {
     metadata_keys: Vec<String>,
@@ -150,11 +155,13 @@ impl MetadataAssignmentRule {
         Self::default()
     }
 
+    /// Adds an application-defined scalar metadata key to the assignment rule.
     pub fn with_metadata_key(mut self, key: impl Into<String>) -> Self {
         self.metadata_keys.push(key.into());
         self
     }
 
+    /// Adds an application-defined string-array metadata key to the assignment rule.
     pub fn with_tag_array_key(mut self, key: impl Into<String>) -> Self {
         self.tag_array_keys.push(key.into());
         self

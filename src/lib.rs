@@ -19,14 +19,17 @@ pub mod report;
 pub mod validation;
 
 pub use clustering::{
-    CaseEmbedding, ClusterAlgorithm, ClusterAssigner, ClusterAssignment, ClusterAssignmentRule,
-    ClusterDiscovery, ClusterDiscoveryInput, ClusterDiscoveryOptions, ClusterLabel,
-    ClusterLabelPayload, ClusterLabelPrompt, ClusterLabeler, ClusterModel, ClusterModelAssigner,
-    ClusterModelSource, ClusterQuality, ClusterQualityReport, ClusterRuleMatch, ClusterText,
-    ClusterTextProjector, DefaultClusterTextProjector, DiscoveredCluster, DistanceMetric,
-    EmbeddingClusterAssigner, EmbeddingProvider, EvalCluster, FnClusterAssignmentRule,
-    KMeansClusterDiscovery, KeywordAssignmentRule, MetadataAssignmentRule, ProjectedField,
-    RuleBasedClusterAssigner,
+    BruteForceVectorIndex, BruteForceVectorIndexBuilder, CaseEmbedding, ClusterAlgorithm,
+    ClusterAssigner, ClusterAssignment, ClusterAssignmentRule, ClusterDiscovery,
+    ClusterDiscoveryInput, ClusterDiscoveryOptions, ClusterLabel, ClusterLabelPayload,
+    ClusterLabelPrompt, ClusterLabeler, ClusterModel, ClusterModelAssigner, ClusterModelSource,
+    ClusterQuality, ClusterQualityReport, ClusterRuleMatch, ClusterText, ClusterTextProjector,
+    DefaultClusterTextProjector, DiscoveredCluster, DistanceMetric, EmbeddingClusterAssigner,
+    EmbeddingProvider, EvalCluster, FnClusterAssignmentRule, KMeansClusterDiscovery,
+    KeywordAssignmentRule, MetadataAssignmentRule, OwnedVectorRecord, ProjectedField,
+    RuleBasedClusterAssigner, VectorIndex, VectorIndexBuilder, VectorIndexClusterAssigner,
+    VectorIndexRow, VectorIndexRowMap, VectorMetric, VectorRecord, VectorRowId, VectorSearchHit,
+    VectorSearchOptions, borrowed_records, case_embedding_records, cluster_centroid_records,
 };
 #[cfg(feature = "cluster-label-openai")]
 pub use clustering::{OPENAI_CLUSTER_LABEL_PROVIDER_NAME, OpenAiClusterLabeler};
@@ -34,6 +37,11 @@ pub use clustering::{OPENAI_CLUSTER_LABEL_PROVIDER_NAME, OpenAiClusterLabeler};
 pub use clustering::{
     OPENAI_EMBEDDING_PROVIDER_NAME, OpenAiEmbeddingClient, OpenAiEmbeddingProvider,
     TextEmbeddingClient,
+};
+#[cfg(feature = "ann-paimon")]
+pub use clustering::{
+    PaimonHnswOptions, PaimonVectorIndex, PaimonVectorIndexBuilder, PaimonVectorIndexConfig,
+    PaimonVectorIndexKind,
 };
 pub use error::{Result, TraceEvalError};
 pub use evaluation::{
@@ -49,14 +57,18 @@ pub use validation::{ValidationIssue, ValidationProfile, ValidationReport, Valid
 
 pub mod prelude {
     pub use crate::clustering::{
-        CaseEmbedding, ClusterAlgorithm, ClusterAssigner, ClusterAssignment, ClusterAssignmentRule,
-        ClusterDiscovery, ClusterDiscoveryInput, ClusterDiscoveryOptions, ClusterLabel,
-        ClusterLabelPayload, ClusterLabelPrompt, ClusterLabeler, ClusterModel,
-        ClusterModelAssigner, ClusterModelSource, ClusterQuality, ClusterQualityReport,
-        ClusterRuleMatch, ClusterText, ClusterTextProjector, DefaultClusterTextProjector,
-        DiscoveredCluster, DistanceMetric, EmbeddingClusterAssigner, EmbeddingProvider,
-        EvalCluster, FnClusterAssignmentRule, KMeansClusterDiscovery, KeywordAssignmentRule,
-        MetadataAssignmentRule, ProjectedField, RuleBasedClusterAssigner,
+        BruteForceVectorIndex, BruteForceVectorIndexBuilder, CaseEmbedding, ClusterAlgorithm,
+        ClusterAssigner, ClusterAssignment, ClusterAssignmentRule, ClusterDiscovery,
+        ClusterDiscoveryInput, ClusterDiscoveryOptions, ClusterLabel, ClusterLabelPayload,
+        ClusterLabelPrompt, ClusterLabeler, ClusterModel, ClusterModelAssigner, ClusterModelSource,
+        ClusterQuality, ClusterQualityReport, ClusterRuleMatch, ClusterText, ClusterTextProjector,
+        DefaultClusterTextProjector, DiscoveredCluster, DistanceMetric, EmbeddingClusterAssigner,
+        EmbeddingProvider, EvalCluster, FnClusterAssignmentRule, KMeansClusterDiscovery,
+        KeywordAssignmentRule, MetadataAssignmentRule, OwnedVectorRecord, ProjectedField,
+        RuleBasedClusterAssigner, VectorIndex, VectorIndexBuilder, VectorIndexClusterAssigner,
+        VectorIndexRow, VectorIndexRowMap, VectorMetric, VectorRecord, VectorRowId,
+        VectorSearchHit, VectorSearchOptions, borrowed_records, case_embedding_records,
+        cluster_centroid_records,
     };
     #[cfg(feature = "cluster-label-openai")]
     pub use crate::clustering::{OPENAI_CLUSTER_LABEL_PROVIDER_NAME, OpenAiClusterLabeler};
@@ -64,6 +76,11 @@ pub mod prelude {
     pub use crate::clustering::{
         OPENAI_EMBEDDING_PROVIDER_NAME, OpenAiEmbeddingClient, OpenAiEmbeddingProvider,
         TextEmbeddingClient,
+    };
+    #[cfg(feature = "ann-paimon")]
+    pub use crate::clustering::{
+        PaimonHnswOptions, PaimonVectorIndex, PaimonVectorIndexBuilder, PaimonVectorIndexConfig,
+        PaimonVectorIndexKind,
     };
     pub use crate::error::{Result, TraceEvalError};
     pub use crate::evaluation::{

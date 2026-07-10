@@ -45,7 +45,7 @@ fn model() -> ClusterModel {
 
 #[test]
 fn nearest_centroid_assignment_sets_distance_confidence_and_method() {
-    let assigner = ClusterModelAssigner::new(model());
+    let mut assigner = ClusterModelAssigner::new(model());
     let case = EvalCase::new("case-new", "trace-new", "input");
 
     let assignment = assigner.assign_case_embedding(&case, &[0.9, 0.1]).unwrap();
@@ -59,7 +59,7 @@ fn nearest_centroid_assignment_sets_distance_confidence_and_method() {
 
 #[test]
 fn nearest_centroid_assignment_marks_novelty() {
-    let assigner = ClusterModelAssigner::new(model()).with_novelty_distance_threshold(0.01);
+    let mut assigner = ClusterModelAssigner::new(model()).with_novelty_distance_threshold(0.01);
     let case = EvalCase::new("case-new", "trace-new", "input");
 
     let assignment = assigner.assign_case_embedding(&case, &[0.7, 0.7]).unwrap();

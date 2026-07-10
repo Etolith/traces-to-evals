@@ -1,4 +1,4 @@
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use crate::extractors::EvalCaseExtractor;
 use crate::model::{EvalCase, Span, SpanKind, Trace};
@@ -65,6 +65,21 @@ fn trace_to_eval_case(trace: &Trace) -> Result<EvalCase> {
         });
 
     let mut metadata = trace.metadata.clone();
+    merge_case_context(&mut metadata, input_span);
+    if let Some(output_span) = output_span {
+        merge_case_context(&mut metadata, output_span);
+    }
+
+    let tool_calls = trace
+        .spans
+        .iter()
+        .filter(|span| span_kind(span) == SpanKind::Tool)
+        .map(tool_call_context)
+        .collect::<Vec<_>>();
+    if !tool_calls.is_empty() {
+        metadata.insert("tool_calls".to_string(), Value::Array(tool_calls));
+    }
+
     metadata.insert(
         "source_span_id".to_string(),
         Value::String(input_span.id.clone()),
@@ -124,6 +139,39 @@ fn string_attribute(span: &Span, key: &str) -> Option<String> {
         Some(Value::String(value)) => Some(value.clone()),
         _ => None,
     }
+}
+
+fn merge_case_context(metadata: &mut std::collections::BTreeMap<String, Value>, span: &Span) {
+    for (key, value) in &span.attributes {
+        if matches!(key.as_str(), "input.value" | "output.value") {
+            continue;
+        }
+        metadata.entry(key.clone()).or_insert_with(|| value.clone());
+    }
+}
+
+fn tool_call_context(span: &Span) -> Value {
+    let mut context = Map::new();
+    context.insert("span_id".to_string(), Value::String(span.id.clone()));
+    context.insert(
+        "tool_name".to_string(),
+        Value::String(
+            string_attribute(span, "gen_ai.tool.name")
+                .or_else(|| string_attribute(span, "tool_name"))
+                .unwrap_or_else(|| span.name.clone()),
+        ),
+    );
+    context.insert(
+        "attributes".to_string(),
+        Value::Object(
+            span.attributes
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect(),
+        ),
+    );
+
+    Value::Object(context)
 }
 
 fn openinference_span_kind(value: &str) -> SpanKind {
@@ -201,6 +249,100 @@ mod tests {
         assert_eq!(
             OpenInferenceExtractor::span_kind_from_attribute("unknown"),
             SpanKind::Other
+        );
+    }
+
+    #[test]
+    fn preserves_agent_context_and_tool_calls() {
+        let mut agent_attributes = BTreeMap::new();
+        agent_attributes.insert(
+            "openinference.span.kind".to_string(),
+            Value::String("AGENT".to_string()),
+        );
+        agent_attributes.insert(
+            "input.value".to_string(),
+            Value::String("replace my card".to_string()),
+        );
+        agent_attributes.insert(
+            "output.value".to_string(),
+            Value::String("card replaced".to_string()),
+        );
+        agent_attributes.insert(
+            "state_delta".to_string(),
+            Value::String(r#"{"resolved":true}"#.to_string()),
+        );
+        agent_attributes.insert(
+            "retrieval_doc_ids".to_string(),
+            Value::String("CARD_POLICY".to_string()),
+        );
+        agent_attributes.insert(
+            "acme.routing_dimension".to_string(),
+            Value::String("priority_support".to_string()),
+        );
+
+        let mut tool_attributes = BTreeMap::new();
+        tool_attributes.insert(
+            "gen_ai.tool.name".to_string(),
+            Value::String("checkEligibility".to_string()),
+        );
+        tool_attributes.insert(
+            "state_delta".to_string(),
+            Value::String(r#"{"eligible":true}"#.to_string()),
+        );
+        tool_attributes.insert("approval_required".to_string(), Value::Bool(false));
+        tool_attributes.insert(
+            "acme.tool_region".to_string(),
+            Value::String("eu-west".to_string()),
+        );
+
+        let trace = Trace::new("trace-1")
+            .with_span(Span {
+                id: "agent-span".to_string(),
+                trace_id: Some("trace-1".to_string()),
+                parent_id: None,
+                name: "agent".to_string(),
+                kind: SpanKind::Other,
+                input: None,
+                output: None,
+                error: None,
+                started_at: None,
+                ended_at: None,
+                attributes: agent_attributes,
+            })
+            .with_span(Span {
+                id: "tool-span".to_string(),
+                trace_id: Some("trace-1".to_string()),
+                parent_id: Some("agent-span".to_string()),
+                name: "execute_tool checkEligibility".to_string(),
+                kind: SpanKind::Tool,
+                input: None,
+                output: None,
+                error: None,
+                started_at: None,
+                ended_at: None,
+                attributes: tool_attributes,
+            });
+
+        let case = OpenInferenceExtractor.extract_trace(&trace).unwrap();
+
+        assert_eq!(case.metadata["state_delta"], r#"{"resolved":true}"#);
+        assert_eq!(case.metadata["retrieval_doc_ids"], "CARD_POLICY");
+        assert_eq!(case.metadata["acme.routing_dimension"], "priority_support");
+        assert_eq!(
+            case.metadata["tool_calls"][0]["tool_name"],
+            "checkEligibility"
+        );
+        assert_eq!(
+            case.metadata["tool_calls"][0]["attributes"]["state_delta"],
+            r#"{"eligible":true}"#
+        );
+        assert_eq!(
+            case.metadata["tool_calls"][0]["attributes"]["approval_required"],
+            false
+        );
+        assert_eq!(
+            case.metadata["tool_calls"][0]["attributes"]["acme.tool_region"],
+            "eu-west"
         );
     }
 }

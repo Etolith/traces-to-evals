@@ -182,11 +182,22 @@ fn public_api_composes_cluster_discovery_primitives() -> Result<()> {
     assert_eq!(model.schema_version, "acme-evals.cluster_model.v1");
 
     let assignment =
-        ClusterModelAssigner::new(model).assign_case_embedding(&case, &embedding.vector)?;
+        ClusterModelAssigner::new(model.clone()).assign_case_embedding(&case, &embedding.vector)?;
     assert_eq!(assignment.cluster_id, "cluster-0001");
     assert_eq!(assignment.method, "embedding_nearest_centroid");
     assert_eq!(assignment.distance, Some(0.0));
     assert!(!assignment.novelty);
+
+    let records = cluster_centroid_records(&model);
+    let borrowed = borrowed_records(&records);
+    let index = BruteForceVectorIndexBuilder::new(VectorMetric::Cosine).build(&borrowed)?;
+    let row_map = VectorIndexRowMap::from_records("centroid-index", &borrowed);
+    let indexed_assignment = VectorIndexClusterAssigner::new(model, index, row_map)?
+        .assign_case_embedding(&case, &embedding.vector)?;
+
+    assert_eq!(indexed_assignment.cluster_id, "cluster-0001");
+    assert_eq!(indexed_assignment.method, "embedding_vector_index");
+    assert_eq!(indexed_assignment.distance, Some(0.0));
 
     Ok(())
 }

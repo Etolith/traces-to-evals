@@ -17,6 +17,7 @@ cluster-label-openai = ["openai_dive", "schemars", "tokio"]
 clustering-linfa = ["linfa", "linfa-clustering", "ndarray", "rand"]
 embeddings-openai = ["openai_dive", "tokio"]
 llm-judge-openai = ["openai_dive", "schemars", "tokio"]
+ann-paimon = ["paimon-vindex-core", "roaring"]
 
 [dependencies]
 anyhow = "1"
@@ -27,7 +28,9 @@ linfa = { version = "0.8", optional = true }
 linfa-clustering = { version = "0.8", optional = true }
 ndarray = { version = "0.16", optional = true }
 openai_dive = { version = "1.4", optional = true }
+paimon-vindex-core = { git = "https://github.com/apache/paimon-vector-index", rev = "93753f7dc8fea0402f7a5c8ee9f080168b553219", package = "paimon-vindex-core", optional = true }
 rand = { version = "0.8", features = ["small_rng"], optional = true }
+roaring = { version = "0.11", optional = true }
 schemars = { version = "1", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

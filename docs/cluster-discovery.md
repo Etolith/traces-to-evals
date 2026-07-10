@@ -120,6 +120,8 @@ Future optional work:
 - Local embedding provider.
 - DBSCAN/HDBSCAN-style discovery.
 - ANN/vector database assignment backends.
+  See [vector-index.md](vector-index.md) for the proposed vector-index trait
+  and Paimon backend design.
 
 ## Module Shape
 
@@ -631,6 +633,25 @@ traceeval cluster assign \
   --results-out clustered_results.jsonl
 ```
 
+The default metadata rule only reads explicit cluster taxonomy fields:
+`cluster_id`, `cluster`, `task_cluster`, and `tags`. Application metadata is
+opt-in and may be selected with a repeatable flag:
+
+```bash
+traceeval cluster assign \
+  --cases eval_cases.jsonl \
+  --clusters clusters.jsonl \
+  --metadata-key route \
+  --metadata-key product_area \
+  --out cluster_assignments.jsonl
+```
+
+All extractors preserve arbitrary trace metadata, and the OpenInference
+extractor also preserves arbitrary root-span attributes. No domain semantics
+are assigned to those fields. `--metadata-key` applies only to rule-based
+assignment with `--clusters`; discovered-model assignment continues to use
+embeddings.
+
 Embedding generation:
 
 ```bash
@@ -688,6 +709,7 @@ CLI validation:
 - `cluster embed --provider openai` requires `embeddings-openai`.
 - `cluster assign --model` plus `--embeddings` uses discovered-model assignment.
 - `cluster assign --clusters` uses existing rule-based assignment.
+- `cluster assign --metadata-key` is repeatable and requires `--clusters`.
 - `--model` and `--clusters` conflict.
 
 ## Feature Flags And Dependencies
@@ -702,7 +724,7 @@ embeddings-openai = ["openai_dive", "tokio"]
 embeddings-local = ["fastembed"]
 clustering-linfa = ["linfa", "linfa-clustering", "ndarray", "rand"]
 cluster-label-openai = ["openai_dive", "schemars", "tokio"]
-ann-hnsw = ["hnsw_rs"]
+ann-paimon = ["paimon-vindex-core", "roaring"]
 
 [dependencies]
 linfa = { version = "0.8", optional = true }
@@ -710,7 +732,8 @@ linfa-clustering = { version = "0.8", optional = true }
 ndarray = { version = "0.16", optional = true }
 rand = { version = "0.8", features = ["small_rng"], optional = true }
 fastembed = { version = "5", optional = true }
-hnsw_rs = { version = "0.3", optional = true }
+paimon-vindex-core = { git = "https://github.com/apache/paimon-vector-index", rev = "93753f7dc8fea0402f7a5c8ee9f080168b553219", package = "paimon-vindex-core", optional = true }
+roaring = { version = "0.11", optional = true }
 ```
 
 Dependency policy:
@@ -718,7 +741,7 @@ Dependency policy:
 - `clustering-linfa` is required for K-Means.
 - `embeddings-openai` is the first network embedding provider.
 - `embeddings-local` is optional and should not be added until local/offline embedding is required.
-- `ann-hnsw` is optional and should not be added until brute-force centroid search is too slow.
+- `ann-paimon` is optional and should not be added until brute-force centroid search is too slow or case-level nearest-neighbor search is required.
 - No feature should enable both OpenAI judging and OpenAI embedding unless it explicitly needs both.
 
 ## Validation Profiles

@@ -22,6 +22,40 @@ fn assigns_cluster_from_metadata() {
 }
 
 #[test]
+fn assigns_cluster_from_configured_metadata_key() {
+    let mut case = EvalCase::new("case-1", "trace-1", "input");
+    case.metadata.insert(
+        "task_type".to_string(),
+        Value::String("card_delivery".to_string()),
+    );
+
+    let assignment =
+        RuleBasedClusterAssigner::empty(vec![cluster("card_delivery", "Card delivery")])
+            .with_rule(MetadataAssignmentRule::new().with_metadata_key("task_type"))
+            .assign_case(&case)
+            .unwrap();
+
+    assert_eq!(assignment.cluster_id, "card_delivery");
+    assert_eq!(assignment.method, "metadata");
+}
+
+#[test]
+fn does_not_assign_application_metadata_by_default() {
+    let mut case = EvalCase::new("case-1", "trace-1", "input");
+    case.metadata.insert(
+        "task_type".to_string(),
+        Value::String("card_delivery".to_string()),
+    );
+
+    let assignment = RuleBasedClusterAssigner::new(vec![cluster("card_delivery", "Card delivery")])
+        .assign_case(&case)
+        .unwrap();
+
+    assert_eq!(assignment.cluster_id, UNCLUSTERED);
+    assert_eq!(assignment.method, "fallback");
+}
+
+#[test]
 fn applies_assignments_to_results() {
     let case = EvalCase::new("case-1", "trace-1", "input");
     let result = EvaluationResult::binary(&case, "non_empty", true, "ok");

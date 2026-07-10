@@ -5,6 +5,7 @@ pub mod labeling;
 #[cfg(any(feature = "embeddings-openai", feature = "cluster-label-openai"))]
 pub mod openai;
 pub mod quality;
+pub mod vector_index;
 
 pub use assignment::{
     ClusterAssigner, ClusterAssignment, ClusterAssignmentRule, ClusterRuleMatch, EvalCluster,
@@ -29,3 +30,14 @@ pub use openai::{
     TextEmbeddingClient,
 };
 pub use quality::{ClusterQuality, ClusterQualityReport};
+pub use vector_index::{
+    BruteForceVectorIndex, BruteForceVectorIndexBuilder, OwnedVectorRecord, VectorIndex,
+    VectorIndexBuilder, VectorIndexClusterAssigner, VectorIndexRow, VectorIndexRowMap,
+    VectorMetric, VectorRecord, VectorRowId, VectorSearchHit, VectorSearchOptions,
+    borrowed_records, case_embedding_records, cluster_centroid_records,
+};
+#[cfg(feature = "ann-paimon")]
+pub use vector_index::{
+    PaimonHnswOptions, PaimonVectorIndex, PaimonVectorIndexBuilder, PaimonVectorIndexConfig,
+    PaimonVectorIndexKind,
+};

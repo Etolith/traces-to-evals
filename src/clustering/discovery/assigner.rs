@@ -11,13 +11,13 @@ use super::{ClusterModel, DiscoveredCluster, DistanceMetric};
 
 pub trait EmbeddingClusterAssigner {
     fn assign_case_embedding(
-        &self,
+        &mut self,
         case: &EvalCase,
         embedding: &[f32],
     ) -> Result<ClusterAssignment>;
 
     fn assign_case_embeddings(
-        &self,
+        &mut self,
         cases: &[EvalCase],
         embeddings: &[CaseEmbedding],
     ) -> Result<Vec<ClusterAssignment>> {
@@ -70,7 +70,7 @@ impl ClusterModelAssigner {
 
 impl EmbeddingClusterAssigner for ClusterModelAssigner {
     fn assign_case_embedding(
-        &self,
+        &mut self,
         case: &EvalCase,
         embedding: &[f32],
     ) -> Result<ClusterAssignment> {

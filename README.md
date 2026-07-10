@@ -149,6 +149,24 @@ cargo run --bin traceeval -- cluster assign \
   --results-out clustered_results.jsonl
 ```
 
+Rule-based assignment reads cluster-oriented metadata keys by default:
+`cluster_id`, `cluster`, `task_cluster`, and the `tags` array. Application
+metadata has no built-in meaning. Select an additional scalar field explicitly
+with the repeatable `--metadata-key` option:
+
+```bash
+cargo run --bin traceeval -- cluster assign \
+  --cases eval_cases.jsonl \
+  --clusters fixtures/eval/clusters.jsonl \
+  --metadata-key route \
+  --metadata-key product_area \
+  --out cluster_assignments.jsonl
+```
+
+All extractors preserve arbitrary trace metadata. The OpenInference extractor
+also preserves arbitrary root-span attributes, so callers can use their own
+fields without adding application concepts to the crate.
+
 Add a custom assignment rule in Rust:
 
 ```rust
@@ -286,7 +304,7 @@ Library APIs return `traces_to_evals::Result<T>` with `TraceEvalError` variants 
 
 ## Planned Work
 
-See [docs/api-and-product-roadmap.md](docs/api-and-product-roadmap.md) for API/product cleanup, [docs/missing.md](docs/missing.md) for remaining work, [docs/scoring-design.md](docs/scoring-design.md) for scoring and calibration design, and [docs/cluster-discovery.md](docs/cluster-discovery.md) for the full cluster discovery, embedding, and LLM labeling spec.
+See [docs/api-and-product-roadmap.md](docs/api-and-product-roadmap.md) for API/product cleanup, [docs/missing.md](docs/missing.md) for remaining work, [docs/scoring-design.md](docs/scoring-design.md) for scoring and calibration design, [docs/cluster-discovery.md](docs/cluster-discovery.md) for the cluster discovery, embedding, and LLM labeling spec, and [docs/vector-index.md](docs/vector-index.md) for the proposed vector index trait and Paimon backend.
 
 Near-term implementation priorities:
 
