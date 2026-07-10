@@ -1,0 +1,31 @@
+{
+  "schema_version": "traceeval.behavior_adapter.v1",
+  "adapter_id": "behavior_fixture",
+  "adapter_version": "1",
+  "tool_mappings": {
+    "lookupAccount": {
+      "operation": "lookup_account",
+      "effect": "read_only",
+      "retry_safety": "idempotent",
+      "requirement": "required"
+    },
+    "cancelCard": {
+      "operation": "cancel_card",
+      "effect": "mutating",
+      "retry_safety": "non_idempotent",
+      "requirement": "required"
+    },
+    "updateSettings": {
+      "operation": "update_settings",
+      "effect": "mutating",
+      "retry_safety": "non_idempotent",
+      "requirement": "required"
+    },
+    "lookupRequest": {
+      "operation": "lookup_request",
+      "effect": "read_only",
+      "retry_safety": "idempotent",
+      "requirement": "required"
+    }
+  }
+}

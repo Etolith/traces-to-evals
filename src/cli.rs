@@ -20,8 +20,14 @@ pub struct Cli {
 pub enum Command {
     /// Extract eval cases from trace JSONL.
     Extract(ExtractArgs),
-    /// Normalize agent behavior and emit deterministic findings.
+    /// Normalize agent behavior and emit deterministic and optional semantic findings.
     Detect(DetectArgs),
+    /// Compare paired baseline and candidate behavior findings.
+    VerifyFindings(VerifyFindingsArgs),
+    /// Verify all paired offline remediation gates.
+    VerifyRemediation(VerifyRemediationArgs),
+    /// Compare baseline and candidate finding recurrence windows.
+    CompareRecurrence(CompareRecurrenceArgs),
     /// Grade eval cases with a deterministic grader or judge provider.
     Grade(GradeArgs),
     /// Validate eval cases and evaluation results.
@@ -35,6 +41,66 @@ pub enum Command {
 }
 
 #[derive(Debug, Clone, Args)]
+pub struct VerifyFindingsArgs {
+    /// Stable regression case identity.
+    #[arg(long = "case-id")]
+    pub case_id: String,
+    /// Baseline behavior findings JSONL.
+    #[arg(long)]
+    pub baseline: PathBuf,
+    /// Candidate behavior findings JSONL.
+    #[arg(long)]
+    pub candidate: PathBuf,
+    /// Expected baseline failure signature that the candidate must remove.
+    #[arg(long = "target-signature", required = true)]
+    pub target_signatures: Vec<String>,
+    /// Severity at which a novel candidate finding fails the gate.
+    #[arg(long, value_enum, default_value = "high")]
+    pub severe_threshold: FindingSeverityName,
+    /// Paired finding verification JSON output.
+    #[arg(long)]
+    pub out: PathBuf,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct VerifyRemediationArgs {
+    /// Versioned remediation verification request JSON.
+    #[arg(long)]
+    pub request: PathBuf,
+    /// Baseline behavior findings JSONL.
+    #[arg(long = "baseline-findings")]
+    pub baseline_findings: PathBuf,
+    /// Candidate behavior findings JSONL.
+    #[arg(long = "candidate-findings")]
+    pub candidate_findings: PathBuf,
+    /// Baseline evaluation results JSONL.
+    #[arg(long = "baseline-results")]
+    pub baseline_results: PathBuf,
+    /// Candidate evaluation results JSONL.
+    #[arg(long = "candidate-results")]
+    pub candidate_results: PathBuf,
+    /// Combined remediation verification JSON output.
+    #[arg(long)]
+    pub out: PathBuf,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct CompareRecurrenceArgs {
+    /// Versioned recurrence comparison request JSON.
+    #[arg(long)]
+    pub request: PathBuf,
+    /// Baseline-window behavior findings JSONL.
+    #[arg(long = "baseline-findings")]
+    pub baseline_findings: PathBuf,
+    /// Candidate-window behavior findings JSONL.
+    #[arg(long = "candidate-findings")]
+    pub candidate_findings: PathBuf,
+    /// Finding recurrence comparison JSON output.
+    #[arg(long)]
+    pub out: PathBuf,
+}
+
+#[derive(Debug, Clone, Args)]
 pub struct DetectArgs {
     /// Input trace JSONL file.
     #[arg(long)]
@@ -42,15 +108,70 @@ pub struct DetectArgs {
     /// Input trace format to normalize.
     #[arg(long, value_enum, default_value = "openinference")]
     pub format: BehaviorTraceFormat,
+    /// Optional versioned application tool-semantics adapter JSON.
+    #[arg(long = "adapter-config")]
+    pub adapter_config: Option<PathBuf>,
     /// Output behavior findings JSONL file.
     #[arg(long)]
     pub out: PathBuf,
+    /// Optional semantic behavior judge provider.
+    #[arg(long = "semantic-judge", value_enum, requires = "semantic_model")]
+    pub semantic_judge: Option<JudgeProviderName>,
+    /// Model name for semantic behavior judging.
+    #[arg(long = "semantic-model", requires = "semantic_judge")]
+    pub semantic_model: Option<String>,
+    /// Optional semantic behavior evaluation results JSONL output.
+    #[arg(long = "semantic-results-out", requires = "semantic_judge")]
+    pub semantic_results_out: Option<PathBuf>,
+    /// Optional bounded semantic behavior projections JSONL output.
+    #[arg(long = "semantic-projections-out", requires = "semantic_judge")]
+    pub semantic_projections_out: Option<PathBuf>,
+    /// Optional UTF-8 rubric file for semantic behavior judging.
+    #[arg(long = "semantic-rubric-file", requires = "semantic_judge")]
+    pub semantic_rubric_file: Option<PathBuf>,
+    /// Stable version for the configured semantic rubric.
+    #[arg(
+        long = "semantic-rubric-version",
+        default_value = "traceeval.semantic_behavior_rubric.v1"
+    )]
+    pub semantic_rubric_version: String,
+    /// Confidence required to classify an eligible semantic failure as actionable.
+    #[arg(long = "semantic-min-confidence", default_value_t = 0.8)]
+    pub semantic_min_confidence: f32,
+    /// Content allowed into the semantic projection.
+    #[arg(
+        long = "semantic-content",
+        value_enum,
+        default_value = "structured-only"
+    )]
+    pub semantic_content: SemanticContentPolicyName,
+    /// Do not emit informational findings when the semantic judge abstains.
+    #[arg(long = "semantic-ignore-abstentions")]
+    pub semantic_ignore_abstentions: bool,
     /// Optional normalized agent behavior JSONL output.
     #[arg(long = "normalized-out")]
     pub normalized_out: Option<PathBuf>,
     /// Optional unreviewed eval candidate JSONL output.
     #[arg(long = "candidates-out")]
     pub candidates_out: Option<PathBuf>,
+    /// Optional immutable evidence packet JSON output.
+    #[arg(long = "evidence-packet-out")]
+    pub evidence_packet_out: Option<PathBuf>,
+    /// Optional safe semantic finding projections JSONL output.
+    #[arg(long = "projections-out")]
+    pub projections_out: Option<PathBuf>,
+    /// Optional safe projection eval cases JSONL for embedding/clustering.
+    #[arg(long = "projection-cases-out")]
+    pub projection_cases_out: Option<PathBuf>,
+    /// Optional exact failure-signature groups JSONL output.
+    #[arg(long = "signature-groups-out")]
+    pub signature_groups_out: Option<PathBuf>,
+    /// Additional trace/finding metadata field allowed into projections.
+    #[arg(long = "projection-metadata-key")]
+    pub projection_metadata_keys: Vec<String>,
+    /// Maximum UTF-8 bytes in each finding projection.
+    #[arg(long, default_value_t = 4_096)]
+    pub projection_max_bytes: usize,
     /// Failed equivalent calls that trigger repeated-failure detection.
     #[arg(long, default_value_t = 3)]
     pub max_repeated_failures: usize,
@@ -171,6 +292,15 @@ pub enum BehaviorTraceFormat {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum FindingSeverityName {
+    Info,
+    Low,
+    Medium,
+    High,
+    Critical,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum ValidationProfileName {
     DraftCases,
     RunnableCases,
@@ -193,6 +323,12 @@ pub enum JudgeProviderName {
     OpenaiDive,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum SemanticContentPolicyName {
+    StructuredOnly,
+    PreRedactedSummaries,
+}
+
 #[cfg(any(
     feature = "llm-judge-openai",
     feature = "embeddings-openai",
@@ -201,7 +337,19 @@ pub enum JudgeProviderName {
 pub async fn run() -> Result<()> {
     match Cli::parse().command {
         Command::Extract(args) => commands::extract::run(args),
-        Command::Detect(args) => commands::detect::run(args),
+        Command::Detect(args) => {
+            #[cfg(feature = "llm-judge-openai")]
+            {
+                commands::detect::run(args).await
+            }
+            #[cfg(not(feature = "llm-judge-openai"))]
+            {
+                commands::detect::run(args)
+            }
+        }
+        Command::VerifyFindings(args) => commands::verify_findings::run(args),
+        Command::VerifyRemediation(args) => commands::verify_remediation::run(args),
+        Command::CompareRecurrence(args) => commands::compare_recurrence::run(args),
         Command::Grade(args) => {
             #[cfg(feature = "llm-judge-openai")]
             {
@@ -237,6 +385,9 @@ pub fn run() -> Result<()> {
     match Cli::parse().command {
         Command::Extract(args) => commands::extract::run(args),
         Command::Detect(args) => commands::detect::run(args),
+        Command::VerifyFindings(args) => commands::verify_findings::run(args),
+        Command::VerifyRemediation(args) => commands::verify_remediation::run(args),
+        Command::CompareRecurrence(args) => commands::compare_recurrence::run(args),
         Command::Grade(args) => commands::grade::run(args),
         Command::Validate(args) => commands::validate::run(args),
         Command::Calibrate(args) => commands::calibrate::run(args),
@@ -246,184 +397,5 @@ pub fn run() -> Result<()> {
 }
 
 #[cfg(test)]
-mod tests {
-    use clap::Parser;
-
-    use super::*;
-
-    #[test]
-    fn parses_judge_grader_args() {
-        let cli = Cli::parse_from([
-            "traceeval",
-            "grade",
-            "--cases",
-            "cases.jsonl",
-            "--judge",
-            "openai-dive",
-            "--model",
-            "gpt-4o",
-            "--out",
-            "out.jsonl",
-        ]);
-
-        let Command::Grade(args) = cli.command else {
-            panic!("expected grade command");
-        };
-
-        assert_eq!(args.cases, PathBuf::from("cases.jsonl"));
-        assert_eq!(args.judge, Some(JudgeProviderName::OpenaiDive));
-        assert_eq!(args.model.as_deref(), Some("gpt-4o"));
-        assert_eq!(args.out, PathBuf::from("out.jsonl"));
-    }
-
-    #[test]
-    fn rejects_missing_value_for_cases() {
-        let result = Cli::try_parse_from([
-            "traceeval",
-            "grade",
-            "--cases",
-            "--judge",
-            "openai-dive",
-            "--model",
-            "gpt-4o",
-            "--out",
-            "out.jsonl",
-        ]);
-
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn parses_detect_outputs_and_limits() {
-        let cli = Cli::parse_from([
-            "traceeval",
-            "detect",
-            "--traces",
-            "traces.jsonl",
-            "--out",
-            "findings.jsonl",
-            "--normalized-out",
-            "behavior.jsonl",
-            "--candidates-out",
-            "candidates.jsonl",
-            "--max-tool-calls",
-            "12",
-        ]);
-
-        let Command::Detect(args) = cli.command else {
-            panic!("expected detect command");
-        };
-
-        assert_eq!(args.format, BehaviorTraceFormat::OpenInference);
-        assert_eq!(args.max_tool_calls, 12);
-        assert_eq!(args.normalized_out, Some(PathBuf::from("behavior.jsonl")));
-        assert_eq!(args.candidates_out, Some(PathBuf::from("candidates.jsonl")));
-    }
-
-    #[test]
-    fn parses_cluster_assign_with_model_source() {
-        let cli = Cli::parse_from([
-            "traceeval",
-            "cluster",
-            "assign",
-            "--cases",
-            "cases.jsonl",
-            "--model",
-            "cluster_model.json",
-            "--embeddings",
-            "embeddings.jsonl",
-            "--out",
-            "assignments.jsonl",
-        ]);
-
-        let Command::Cluster(cluster_args) = cli.command else {
-            panic!("expected cluster command");
-        };
-        let ClusterCommand::Assign(args) = cluster_args.command else {
-            panic!("expected cluster assign command");
-        };
-
-        assert_eq!(args.cases, PathBuf::from("cases.jsonl"));
-        assert_eq!(args.model, Some(PathBuf::from("cluster_model.json")));
-        assert_eq!(args.embeddings, Some(PathBuf::from("embeddings.jsonl")));
-        assert_eq!(args.out, PathBuf::from("assignments.jsonl"));
-    }
-
-    #[test]
-    fn parses_repeatable_cluster_assignment_metadata_keys() {
-        let cli = Cli::parse_from([
-            "traceeval",
-            "cluster",
-            "assign",
-            "--cases",
-            "cases.jsonl",
-            "--clusters",
-            "clusters.jsonl",
-            "--metadata-key",
-            "task_type",
-            "--metadata-key",
-            "product_area",
-            "--out",
-            "assignments.jsonl",
-        ]);
-
-        let Command::Cluster(cluster_args) = cli.command else {
-            panic!("expected cluster command");
-        };
-        let ClusterCommand::Assign(args) = cluster_args.command else {
-            panic!("expected cluster assign command");
-        };
-
-        assert_eq!(args.metadata_keys, ["task_type", "product_area"]);
-    }
-
-    #[test]
-    fn rejects_cluster_assign_without_source() {
-        let result = Cli::try_parse_from([
-            "traceeval",
-            "cluster",
-            "assign",
-            "--cases",
-            "cases.jsonl",
-            "--out",
-            "assignments.jsonl",
-        ]);
-
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn parses_cluster_embed_project_and_dimensions_args() {
-        let cli = Cli::parse_from([
-            "traceeval",
-            "cluster",
-            "embed",
-            "--cases",
-            "cases.jsonl",
-            "--provider",
-            "openai",
-            "--model",
-            "text-embedding-3-small",
-            "--dimensions",
-            "512",
-            "--project-name",
-            "acme-evals",
-            "--out",
-            "embeddings.jsonl",
-        ]);
-
-        let Command::Cluster(cluster_args) = cli.command else {
-            panic!("expected cluster command");
-        };
-        let ClusterCommand::Embed(args) = cluster_args.command else {
-            panic!("expected cluster embed command");
-        };
-
-        assert_eq!(args.cases, PathBuf::from("cases.jsonl"));
-        assert_eq!(args.provider, ClusterEmbeddingProviderName::Openai);
-        assert_eq!(args.model, "text-embedding-3-small");
-        assert_eq!(args.dimensions, Some(512));
-        assert_eq!(args.project_name.as_deref(), Some("acme-evals"));
-        assert_eq!(args.out, PathBuf::from("embeddings.jsonl"));
-    }
-}
+#[path = "cli/tests.rs"]
+mod tests;

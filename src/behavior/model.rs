@@ -3,6 +3,8 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::{Result, TraceEvalError};
+
 pub const AGENT_BEHAVIOR_TRACE_SCHEMA_VERSION: &str = "traceeval.agent_behavior_trace.v1";
 pub const BEHAVIOR_FINDING_SCHEMA_VERSION: &str = "agent.behavior.finding.v1";
 pub const EVAL_CANDIDATE_SCHEMA_VERSION: &str = "traceeval.eval_candidate.v1";
@@ -36,10 +38,58 @@ impl EvidenceRef {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StateChangeRef {
-    pub evidence: EvidenceRef,
-    pub changed: bool,
-    #[serde(default)]
-    pub verified: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub predicate: Option<String>,
+    pub observation: StateObservation,
+    pub artifact: EvidenceRef,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StateObservation {
+    VerifiedChanged,
+    VerifiedUnchanged,
+    Unverified,
+    Ambiguous,
+    Conflicting,
+    #[default]
+    Unknown,
+}
+
+impl StateObservation {
+    pub fn is_verified(self) -> bool {
+        matches!(self, Self::VerifiedChanged | Self::VerifiedUnchanged)
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OperationEffect {
+    ReadOnly,
+    Mutating,
+    Verifying,
+    Compensating,
+    Escalating,
+    #[default]
+    Unknown,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RetrySafety {
+    Idempotent,
+    NonIdempotent,
+    #[default]
+    Unknown,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolRequirement {
+    Required,
+    Optional,
+    #[default]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -75,6 +125,12 @@ pub struct ToolCallFact {
     pub tool_name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operation: Option<String>,
+    #[serde(default)]
+    pub effect: OperationEffect,
+    #[serde(default)]
+    pub retry_safety: RetrySafety,
+    #[serde(default)]
+    pub requirement: ToolRequirement,
     #[serde(default = "default_attempt")]
     pub attempt: u32,
     pub started_at: String,
@@ -89,12 +145,6 @@ pub struct ToolCallFact {
     pub approval_outcome: Option<ApprovalOutcome>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state_change: Option<StateChangeRef>,
-    #[serde(default)]
-    pub required: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub idempotent: Option<bool>,
-    #[serde(default)]
-    pub mutating: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub evidence: Vec<EvidenceRef>,
 }
@@ -159,29 +209,51 @@ pub struct PolicyDecision {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FinalOutcomeStatus {
-    Succeeded,
+    Completed,
     Failed,
-    Refused,
+    SafelyRefused,
     Escalated,
     Incomplete,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ClaimedOutcomeStatus {
+    Succeeded,
+    Failed,
+    NotCompleted,
+    StateUnknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OutcomeClaim {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_id: Option<String>,
+    pub status: ClaimedOutcomeStatus,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<EvidenceRef>,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EscalationStatus {
+    NotRequired,
+    RequiredAndPerformed,
+    RequiredAndMissing,
+    #[default]
     Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FinalOutcome {
     pub status: FinalOutcomeStatus,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub response_summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub claims: Vec<OutcomeClaim>,
     #[serde(default)]
-    pub claimed_success: bool,
-    #[serde(default)]
-    pub resolution_present: bool,
-    #[serde(default)]
-    pub escalation_required: bool,
-    #[serde(default)]
-    pub escalation_performed: bool,
-    #[serde(default)]
-    pub failure_acknowledged: bool,
+    pub escalation: EscalationStatus,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub evidence: Vec<EvidenceRef>,
 }
@@ -190,12 +262,8 @@ impl Default for FinalOutcome {
     fn default() -> Self {
         Self {
             status: FinalOutcomeStatus::Unknown,
-            response_summary: None,
-            claimed_success: false,
-            resolution_present: false,
-            escalation_required: false,
-            escalation_performed: false,
-            failure_acknowledged: false,
+            claims: Vec::new(),
+            escalation: EscalationStatus::Unknown,
             evidence: Vec::new(),
         }
     }
@@ -237,6 +305,7 @@ impl AgentBehaviorTrace {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[cfg_attr(feature = "llm-judge-openai", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum FindingSeverity {
     Info,
@@ -288,22 +357,112 @@ pub enum EvalCandidateStatus {
 pub struct CandidateGenerator {
     pub name: String,
     pub version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CandidateReviewDecision {
+    Approve,
+    Reject,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CandidateReview {
+    pub reviewer_ref: String,
+    pub reviewed_at: String,
+    pub decision: CandidateReviewDecision,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RedactedCandidateInput {
+    summary: String,
+    redaction_policy_version: String,
+    evidence: Vec<EvidenceRef>,
+}
+
+impl RedactedCandidateInput {
+    pub fn new(
+        summary: impl Into<String>,
+        redaction_policy_version: impl Into<String>,
+        evidence: Vec<EvidenceRef>,
+    ) -> Result<Self> {
+        let input = Self {
+            summary: summary.into(),
+            redaction_policy_version: redaction_policy_version.into(),
+            evidence,
+        };
+        input.validate()?;
+        Ok(input)
+    }
+
+    pub fn summary(&self) -> &str {
+        &self.summary
+    }
+
+    pub fn redaction_policy_version(&self) -> &str {
+        &self.redaction_policy_version
+    }
+
+    pub fn evidence(&self) -> &[EvidenceRef] {
+        &self.evidence
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        if self.summary.trim().is_empty() {
+            return Err(invalid_candidate_input("summary must not be empty"));
+        }
+        if self.redaction_policy_version.trim().is_empty() {
+            return Err(invalid_candidate_input(
+                "redaction_policy_version must not be empty",
+            ));
+        }
+        if self.evidence.is_empty()
+            || self.evidence.iter().any(|evidence| {
+                evidence.kind.trim().is_empty() || evidence.identity.trim().is_empty()
+            })
+        {
+            return Err(invalid_candidate_input(
+                "at least one valid redaction evidence reference is required",
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn invalid_candidate_input(message: impl Into<String>) -> TraceEvalError {
+    TraceEvalError::InvalidCandidateInput {
+        message: message.into(),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EvalCandidate {
     pub schema_version: String,
     pub candidate_id: String,
+    pub definition_hash: String,
     pub status: EvalCandidateStatus,
     pub source_trace_id: String,
     pub source_finding_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub source_cluster_refs: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub proposed_input: Option<String>,
+    pub evidence_packet_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proposed_input: Option<RedactedCandidateInput>,
     #[serde(default)]
     pub proposed_expected_behavior: Vec<String>,
     pub proposed_rubric: String,
     pub proposed_grader: String,
     pub generator: CandidateGenerator,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review: Option<CandidateReview>,
     #[serde(default)]
     pub evidence: Vec<EvidenceRef>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]

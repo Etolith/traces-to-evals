@@ -54,6 +54,27 @@ pub enum TraceEvalError {
     #[error("invalid project name {name:?}: {message}")]
     InvalidProjectName { name: String, message: String },
 
+    #[error("behavior adapter {adapter_id:?} is invalid: {message}")]
+    InvalidBehaviorAdapter { adapter_id: String, message: String },
+
+    #[error("eval candidate {candidate_id} transition is invalid: {message}")]
+    InvalidCandidateTransition {
+        candidate_id: String,
+        message: String,
+    },
+
+    #[error("invalid redacted candidate input: {message}")]
+    InvalidCandidateInput { message: String },
+
+    #[error("invalid remediation verification request: {message}")]
+    InvalidRemediationVerificationRequest { message: String },
+
+    #[error("invalid finding recurrence request: {message}")]
+    InvalidFindingRecurrenceRequest { message: String },
+
+    #[error("semantic behavior evaluation for trace {trace_id} is invalid: {message}")]
+    InvalidSemanticBehaviorEvaluation { trace_id: String, message: String },
+
     #[error("validation failed with {error_count} errors and {warning_count} warnings")]
     ValidationFailed {
         error_count: usize,

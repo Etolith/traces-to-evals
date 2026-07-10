@@ -1,7 +1,10 @@
 pub mod calibrate;
 pub mod cluster;
+pub mod compare_recurrence;
 pub mod detect;
 pub mod extract;
 pub mod grade;
 pub mod report;
 pub mod validate;
+pub mod verify_findings;
+pub mod verify_remediation;
