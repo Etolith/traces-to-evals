@@ -48,6 +48,23 @@ fn public_api_exposes_typed_errors_for_common_failures() {
 }
 
 #[test]
+fn public_api_projects_agent_behavior_for_semantic_evaluation() {
+    let mut behavior = AgentBehaviorTrace::new("trace-semantic");
+    behavior.input_summary = Some("content excluded by default".to_string());
+    behavior.evidence.push(EvidenceRef::span("root"));
+
+    let projection = SemanticBehaviorProjector::new().project(&behavior);
+
+    assert_eq!(
+        projection.content_policy,
+        SemanticContentPolicy::StructuredOnly
+    );
+    assert!(projection.input_summary.is_none());
+    assert!(projection.projection_hash.starts_with("sha256:"));
+    assert_eq!(projection.evidence[0].key, "e1");
+}
+
+#[test]
 fn public_api_composes_trace_extraction_evaluation_calibration_and_aggregation() -> Result<()> {
     let traces = vec![
         Trace::new("trace-1")

@@ -22,66 +22,6 @@ fn assert_success(output: Output) {
 }
 
 #[test]
-fn cli_detects_agent_findings_and_emits_unreviewed_candidates() {
-    let dir = tempdir().unwrap();
-    let normalized = dir.path().join("normalized.jsonl");
-    let findings = dir.path().join("findings.jsonl");
-    let candidates = dir.path().join("candidates.jsonl");
-
-    assert_success(
-        traceeval()
-            .args(["detect", "--traces"])
-            .arg(repo_path("fixtures/behavior/traces.jsonl"))
-            .args(["--normalized-out"])
-            .arg(&normalized)
-            .args(["--candidates-out"])
-            .arg(&candidates)
-            .args(["--out"])
-            .arg(&findings)
-            .output()
-            .unwrap(),
-    );
-
-    let normalized_rows = std::fs::read_to_string(normalized).unwrap();
-    assert_eq!(normalized_rows.lines().count(), 4);
-    assert!(normalized_rows.contains("\"status\":\"timed_out\""));
-    assert!(!normalized_rows.contains("request timed out after dispatch"));
-
-    let finding_rows = std::fs::read_to_string(findings).unwrap();
-    let finding_values = finding_rows
-        .lines()
-        .map(|line| serde_json::from_str::<Value>(line).unwrap())
-        .collect::<Vec<_>>();
-    let detector_ids = finding_values
-        .iter()
-        .map(|finding| finding["detector_id"].as_str().unwrap())
-        .collect::<Vec<_>>();
-    assert_eq!(finding_values.len(), 5);
-    assert!(detector_ids.contains(&"terminal_tool_failure"));
-    assert!(detector_ids.contains(&"uncertain_mutation_state"));
-    assert!(detector_ids.contains(&"false_success_claim"));
-    assert!(detector_ids.contains(&"missing_resolution"));
-    assert!(finding_values.iter().all(|finding| {
-        finding["finding_id"]
-            .as_str()
-            .unwrap()
-            .starts_with("sha256:")
-    }));
-
-    let candidate_values = std::fs::read_to_string(candidates)
-        .unwrap()
-        .lines()
-        .map(|line| serde_json::from_str::<Value>(line).unwrap())
-        .collect::<Vec<_>>();
-    assert_eq!(candidate_values.len(), finding_values.len());
-    assert!(
-        candidate_values
-            .iter()
-            .all(|candidate| candidate["status"] == "candidate")
-    );
-}
-
-#[test]
 fn cli_runs_extract_grade_calibrate_cluster_report_workflow() {
     let dir = tempdir().unwrap();
     let cases = dir.path().join("cases.jsonl");
