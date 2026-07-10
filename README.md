@@ -31,6 +31,14 @@ The crate is organized around a composable evaluation pipeline:
 - `SimpleExtractor` extracts cases from the first useful input span and the last useful output span.
 - `OpenInferenceExtractor` understands OpenInference-style attributes such as `openinference.span.kind`, `input.value`, and `output.value`.
 
+**Agent behavior findings**
+
+- `OpenInferenceBehaviorNormalizer` converts trace spans into versioned `AgentBehaviorTrace` records with bounded tool, approval, state-change, policy, and final-outcome facts.
+- `DeterministicDetectorSet` detects terminal and repeated tool failures, call loops, uncertain mutations, false success claims, approval bypasses, policy violations, excessive tool usage, unresolved escalations, and missing resolutions.
+- Recovery analysis suppresses a terminal failure when an idempotent retry, verified state, safe escalation, or accurate failure response resolves it.
+- Finding IDs and failure signatures are deterministic SHA-256 identities. Error messages are represented by hashes rather than copied into findings.
+- `FindingEvalCandidateGenerator` creates reviewable `candidate` records; it never promotes generated behavior into an accepted eval suite.
+
 **Graders and judges**
 
 - `NonEmptyOutputGrader`
@@ -73,6 +81,34 @@ cargo run --bin traceeval -- extract \
   --traces fixtures/openinference/traces.jsonl \
   --out eval_cases.jsonl
 ```
+
+Normalize agent behavior and detect deterministic findings:
+
+```bash
+cargo run --bin traceeval -- detect \
+  --format openinference \
+  --traces fixtures/behavior/traces.jsonl \
+  --normalized-out agent_behavior.jsonl \
+  --out behavior_findings.jsonl \
+  --candidates-out eval_candidates.jsonl
+```
+
+The local CLI accepts threshold overrides such as `--max-repeated-failures`,
+`--max-equivalent-calls`, `--max-tool-calls`, and
+`--max-total-tool-duration-ms`. Candidate output remains unreviewed and keeps
+source finding/evidence provenance. Cross-trace importance scoring, issue
+aggregation, storage, sandboxes, deployments, and approval policy remain
+platform responsibilities.
+
+The normalizer uses explicit structured evidence when present. Supported
+adapter attributes include `agent.tool.status`, `agent.operation`,
+`agent.mutation`, `agent.idempotent`, `agent.tool.required`,
+`agent.approval.required`, `agent.approval.outcome`,
+`agent.policy.outcome`, `agent.final.status`,
+`agent.final.claimed_success`, and escalation/resolution flags. It also reads
+the existing OpenInference and OpenTelemetry GenAI names used by the fintech
+demo, including `openinference.span.kind`, `gen_ai.tool.name`,
+`gen_ai.tool.call.id`, `approval_required`, and bounded `state_delta` values.
 
 Validate cases or evaluation results:
 
@@ -245,6 +281,26 @@ let run = EvaluationRun::new(cases)
     .evaluate_with_async(&judge)
     .await?;
 # Ok(())
+# }
+```
+
+Behavior normalization and detection also compose as library APIs:
+
+```rust
+use traces_to_evals::prelude::*;
+
+# fn example(trace: &Trace) -> traces_to_evals::Result<Vec<BehaviorFinding>> {
+let behavior = OpenInferenceBehaviorNormalizer::default().normalize(trace)?;
+let findings = DeterministicDetectorSet::default().detect(&behavior);
+let candidates = FindingEvalCandidateGenerator.generate_all(
+    std::slice::from_ref(&behavior),
+    &findings,
+);
+
+assert!(candidates
+    .iter()
+    .all(|candidate| candidate.status == EvalCandidateStatus::Candidate));
+# Ok(findings)
 # }
 ```
 

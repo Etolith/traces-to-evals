@@ -20,6 +20,8 @@ pub struct Cli {
 pub enum Command {
     /// Extract eval cases from trace JSONL.
     Extract(ExtractArgs),
+    /// Normalize agent behavior and emit deterministic findings.
+    Detect(DetectArgs),
     /// Grade eval cases with a deterministic grader or judge provider.
     Grade(GradeArgs),
     /// Validate eval cases and evaluation results.
@@ -30,6 +32,37 @@ pub enum Command {
     Cluster(ClusterArgs),
     /// Build an aggregate evaluation report.
     Report(ReportArgs),
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct DetectArgs {
+    /// Input trace JSONL file.
+    #[arg(long)]
+    pub traces: PathBuf,
+    /// Input trace format to normalize.
+    #[arg(long, value_enum, default_value = "openinference")]
+    pub format: BehaviorTraceFormat,
+    /// Output behavior findings JSONL file.
+    #[arg(long)]
+    pub out: PathBuf,
+    /// Optional normalized agent behavior JSONL output.
+    #[arg(long = "normalized-out")]
+    pub normalized_out: Option<PathBuf>,
+    /// Optional unreviewed eval candidate JSONL output.
+    #[arg(long = "candidates-out")]
+    pub candidates_out: Option<PathBuf>,
+    /// Failed equivalent calls that trigger repeated-failure detection.
+    #[arg(long, default_value_t = 3)]
+    pub max_repeated_failures: usize,
+    /// Equivalent calls without progress that trigger loop detection.
+    #[arg(long, default_value_t = 4)]
+    pub max_equivalent_calls: usize,
+    /// Maximum tool calls allowed per trace.
+    #[arg(long, default_value_t = 25)]
+    pub max_tool_calls: usize,
+    /// Maximum total tool latency allowed per trace.
+    #[arg(long, default_value_t = 60_000)]
+    pub max_total_tool_duration_ms: u64,
 }
 
 #[derive(Debug, Clone, Args)]
@@ -132,6 +165,12 @@ pub enum ExtractFormat {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum BehaviorTraceFormat {
+    #[value(name = "openinference", alias = "open-inference")]
+    OpenInference,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum ValidationProfileName {
     DraftCases,
     RunnableCases,
@@ -162,6 +201,7 @@ pub enum JudgeProviderName {
 pub async fn run() -> Result<()> {
     match Cli::parse().command {
         Command::Extract(args) => commands::extract::run(args),
+        Command::Detect(args) => commands::detect::run(args),
         Command::Grade(args) => {
             #[cfg(feature = "llm-judge-openai")]
             {
@@ -196,6 +236,7 @@ pub async fn run() -> Result<()> {
 pub fn run() -> Result<()> {
     match Cli::parse().command {
         Command::Extract(args) => commands::extract::run(args),
+        Command::Detect(args) => commands::detect::run(args),
         Command::Grade(args) => commands::grade::run(args),
         Command::Validate(args) => commands::validate::run(args),
         Command::Calibrate(args) => commands::calibrate::run(args),
@@ -250,6 +291,33 @@ mod tests {
         ]);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn parses_detect_outputs_and_limits() {
+        let cli = Cli::parse_from([
+            "traceeval",
+            "detect",
+            "--traces",
+            "traces.jsonl",
+            "--out",
+            "findings.jsonl",
+            "--normalized-out",
+            "behavior.jsonl",
+            "--candidates-out",
+            "candidates.jsonl",
+            "--max-tool-calls",
+            "12",
+        ]);
+
+        let Command::Detect(args) = cli.command else {
+            panic!("expected detect command");
+        };
+
+        assert_eq!(args.format, BehaviorTraceFormat::OpenInference);
+        assert_eq!(args.max_tool_calls, 12);
+        assert_eq!(args.normalized_out, Some(PathBuf::from("behavior.jsonl")));
+        assert_eq!(args.candidates_out, Some(PathBuf::from("candidates.jsonl")));
     }
 
     #[test]

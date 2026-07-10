@@ -1,3 +1,4 @@
+pub mod behavior;
 pub mod calibration;
 #[doc(hidden)]
 pub mod cli;
@@ -18,6 +19,18 @@ pub mod providers;
 pub mod report;
 pub mod validation;
 
+pub use behavior::{
+    AGENT_BEHAVIOR_TRACE_SCHEMA_VERSION, AgentBehaviorNormalizer, AgentBehaviorTrace, AgentRole,
+    AgentTurn, ApprovalBypassDetector, ApprovalOutcome, BEHAVIOR_FINDING_SCHEMA_VERSION,
+    BehaviorFinding, CandidateGenerator, DETERMINISTIC_DETECTOR_VERSION, DeterministicDetectorSet,
+    EVAL_CANDIDATE_SCHEMA_VERSION, EvalCandidate, EvalCandidateGenerator, EvalCandidateStatus,
+    EvidenceRef, ExcessiveToolUsageDetector, FalseSuccessClaimDetector, FinalOutcome,
+    FinalOutcomeStatus, FindingEvalCandidateGenerator, FindingSeverity, MissingResolutionDetector,
+    NormalizedToolError, OpenInferenceBehaviorNormalizer, PolicyDecision, PolicyDecisionOutcome,
+    PolicyViolationDetector, RecoveryAnalyzer, RecoveryStatus, RepeatedToolFailureDetector,
+    StateChangeRef, TerminalToolFailureDetector, ToolCallFact, ToolCallLoopDetector,
+    ToolCallStatus, TraceDetector, UncertainMutationStateDetector, UnresolvedEscalationDetector,
+};
 pub use clustering::{
     BruteForceVectorIndex, BruteForceVectorIndexBuilder, CaseEmbedding, ClusterAlgorithm,
     ClusterAssigner, ClusterAssignment, ClusterAssignmentRule, ClusterDiscovery,
@@ -56,6 +69,20 @@ pub use report::{
 pub use validation::{ValidationIssue, ValidationProfile, ValidationReport, ValidationSeverity};
 
 pub mod prelude {
+    pub use crate::behavior::{
+        AGENT_BEHAVIOR_TRACE_SCHEMA_VERSION, AgentBehaviorNormalizer, AgentBehaviorTrace,
+        AgentRole, AgentTurn, ApprovalBypassDetector, ApprovalOutcome,
+        BEHAVIOR_FINDING_SCHEMA_VERSION, BehaviorFinding, CandidateGenerator,
+        DETERMINISTIC_DETECTOR_VERSION, DeterministicDetectorSet, EVAL_CANDIDATE_SCHEMA_VERSION,
+        EvalCandidate, EvalCandidateGenerator, EvalCandidateStatus, EvidenceRef,
+        ExcessiveToolUsageDetector, FalseSuccessClaimDetector, FinalOutcome, FinalOutcomeStatus,
+        FindingEvalCandidateGenerator, FindingSeverity, MissingResolutionDetector,
+        NormalizedToolError, OpenInferenceBehaviorNormalizer, PolicyDecision,
+        PolicyDecisionOutcome, PolicyViolationDetector, RecoveryAnalyzer, RecoveryStatus,
+        RepeatedToolFailureDetector, StateChangeRef, TerminalToolFailureDetector, ToolCallFact,
+        ToolCallLoopDetector, ToolCallStatus, TraceDetector, UncertainMutationStateDetector,
+        UnresolvedEscalationDetector,
+    };
     pub use crate::clustering::{
         BruteForceVectorIndex, BruteForceVectorIndexBuilder, CaseEmbedding, ClusterAlgorithm,
         ClusterAssigner, ClusterAssignment, ClusterAssignmentRule, ClusterDiscovery,
