@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 use crate::SpanKind;
 
 pub const TRACE_COMPARISON_SCHEMA_VERSION: &str = "traceeval.trace_comparison.v1";
-pub const TRACE_COMPARISON_ENGINE_VERSION: &str = "bounded-structural-alignment-v1";
+pub const TRACE_COMPARISON_ENGINE_VERSION: &str = "bounded-structural-alignment-v2";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecutionStep {
@@ -267,6 +267,23 @@ fn compare_pair(left: &ExecutionStep, right: &ExecutionStep) -> AlignedExecution
     let exact_identity = left.span_id == right.span_id;
     let status_changed = left.status_code != right.status_code;
     let facts_changed = left.facts != right.facts;
+    if (status_changed || facts_changed)
+        && left.kind == SpanKind::Agent
+        && right.kind == SpanKind::Agent
+        && left.parent_span_id.is_none()
+        && right.parent_span_id.is_none()
+    {
+        return AlignedExecutionRow {
+            baseline: Some(left.clone()),
+            candidate: Some(right.clone()),
+            relation: AlignmentRelation::Changed,
+            meaningful: false,
+            reason: Some(
+                "Root outcome summary changed; this is an effect, not a causal divergence.".into(),
+            ),
+            confidence: 0.9,
+        };
+    }
     if status_changed || facts_changed {
         let reason = if status_changed {
             format!(
@@ -465,6 +482,46 @@ mod tests {
 
         assert!(comparison.first_meaningful_divergence.is_none());
         assert_eq!(comparison.common_prefix_steps, 1);
+    }
+
+    #[test]
+    fn root_outcome_change_does_not_mask_later_causal_divergence() {
+        let mut baseline_root = step("root-left", "agent.run", 1);
+        baseline_root.kind = SpanKind::Agent;
+        baseline_root.parent_span_id = None;
+        let mut candidate_root = baseline_root.clone();
+        candidate_root.span_id = "root-right".into();
+        candidate_root.status_code = 2;
+
+        let baseline = input(
+            "baseline",
+            vec![baseline_root, step("click-left", "browser.click", 1)],
+        );
+        let candidate = input(
+            "candidate",
+            vec![candidate_root, step("click-right", "browser.click", 2)],
+        );
+
+        let comparison =
+            StructuralTraceAligner.compare(&baseline, &candidate, TraceAlignmentOptions::default());
+
+        assert_eq!(comparison.common_prefix_steps, 1);
+        assert_eq!(
+            comparison
+                .first_meaningful_divergence
+                .as_ref()
+                .unwrap()
+                .alignment_index,
+            1
+        );
+        assert!(
+            comparison
+                .first_meaningful_divergence
+                .as_ref()
+                .unwrap()
+                .reason
+                .contains("Status changed")
+        );
     }
 
     #[test]

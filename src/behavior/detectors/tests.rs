@@ -76,6 +76,27 @@ fn coverage_aware_report_does_not_promote_missing_facts() {
 }
 
 #[test]
+fn unrelated_success_without_requiredness_does_not_hide_terminal_failure() {
+    let failed = call("required_lookup", ToolCallStatus::Failed, false);
+    let mut unrelated_success = call("optional_cleanup", ToolCallStatus::Succeeded, false);
+    unrelated_success.requirement = ToolRequirement::Unknown;
+    let mut trace = trace_with(vec![failed, unrelated_success]);
+    trace.coverage.final_outcome = FactQuality::Explicit;
+
+    let report = DeterministicDetectorSet::default().detect_report(&trace);
+    let coverage = &report.detector_coverage["terminal_tool_failure"];
+
+    assert_eq!(coverage.status, DetectorEvaluationStatusV1::Evaluated);
+    assert!(!coverage.missing_facts.contains("tool_requirement"));
+    assert!(
+        report
+            .findings
+            .iter()
+            .any(|finding| finding.detector_id == "terminal_tool_failure")
+    );
+}
+
+#[test]
 fn recovered_idempotent_retry_does_not_fire_terminal_failure() {
     let failed = call("lookup", ToolCallStatus::Failed, false);
     let mut succeeded = call("lookup", ToolCallStatus::Succeeded, false);
@@ -463,7 +484,7 @@ fn call_loop_does_not_merge_retries_with_distinct_intervening_work() {
 }
 
 #[test]
-fn conservative_v2_detector_v5_agent_handoff_breaks_a_call_loop_episode() {
+fn conservative_v2_detector_v6_agent_handoff_breaks_a_call_loop_episode() {
     let mut calls = Vec::new();
     for index in 0..2 {
         let mut retry = call("browser", ToolCallStatus::Failed, false);
@@ -485,7 +506,7 @@ fn conservative_v2_detector_v5_agent_handoff_breaks_a_call_loop_episode() {
     let detector_set = DeterministicDetectorSet::default();
     assert_eq!(detector_set.profile().profile_id, "traceeval.conservative");
     assert_eq!(detector_set.profile().profile_version, "2");
-    assert_eq!(ToolCallLoopDetector::default().version(), "5");
+    assert_eq!(ToolCallLoopDetector::default().version(), "6");
     assert!(
         ToolCallLoopDetector::default()
             .detect(&trace_with(calls))
