@@ -2,6 +2,10 @@
 name = "traces-to-evals"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85"
+description = "Turn agent execution traces into evidence-backed failure findings and reusable evals"
+repository = "https://github.com/Etolith/traces-to-evals"
+license = "GPL-3.0-or-later"
 
 [lib]
 name = "traces_to_evals"

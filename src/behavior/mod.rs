@@ -1,10 +1,13 @@
 mod adapter;
 mod candidate;
+mod detection_report;
 mod detectors;
 mod evidence;
 mod grouping;
+mod input;
 mod model;
 mod normalizer;
+mod presentation;
 mod projection;
 mod recurrence;
 mod runner;
@@ -13,6 +16,13 @@ mod verification;
 
 pub use adapter::{BEHAVIOR_ADAPTER_SCHEMA_VERSION, BehaviorAdapterConfig, ToolSemanticMapping};
 pub use candidate::{EvalCandidateGenerator, FindingEvalCandidateGenerator};
+pub use detection_report::{
+    CONSERVATIVE_DETECTOR_PROFILE_ID, CONSERVATIVE_DETECTOR_PROFILE_VERSION,
+    DETECTION_REPORT_SCHEMA_VERSION, DETECTOR_PROFILE_SCHEMA_VERSION, DetectionReportV1,
+    DetectorCoverageV1, DetectorEvaluationStatusV1, DetectorProfileIdentityV1, DetectorProfileV1,
+    RepeatedFailurePolicyV1, TelemetryDiagnosticSeverityV1, TelemetryDiagnosticV1,
+    ToolLoopPolicyV1, ToolUsageBudgetV1,
+};
 pub use detectors::{
     ApprovalBypassDetector, DETERMINISTIC_DETECTOR_VERSION, DeterministicDetectorSet,
     ExcessiveToolUsageDetector, FalseSuccessClaimDetector, MissingResolutionDetector,
@@ -24,16 +34,25 @@ pub use evidence::{EVIDENCE_PACKET_SCHEMA_VERSION, EvidencePacket, EvidencePacke
 pub use grouping::{
     KNOWN_SIGNATURE_GROUP_SCHEMA_VERSION, KnownSignatureGroup, KnownSignatureGrouper,
 };
+pub use input::{
+    BEHAVIOR_INPUT_SCHEMA_VERSION, BehaviorInputCoverageV1, BehaviorInputPrivacyV1,
+    BehaviorInputProvenanceV1, BehaviorInputV1, SAFE_BEHAVIOR_PROJECTION_VERSION,
+};
 pub use model::{
     AGENT_BEHAVIOR_TRACE_SCHEMA_VERSION, AgentBehaviorTrace, AgentRole, AgentTurn, ApprovalOutcome,
     BEHAVIOR_FINDING_SCHEMA_VERSION, BehaviorFinding, CandidateGenerator, CandidateReview,
     CandidateReviewDecision, ClaimedOutcomeStatus, EVAL_CANDIDATE_SCHEMA_VERSION, EscalationStatus,
     EvalCandidate, EvalCandidateStatus, EvidenceRef, FinalOutcome, FinalOutcomeStatus,
-    FindingSeverity, NormalizedToolError, OperationEffect, OutcomeClaim, PolicyDecision,
-    PolicyDecisionOutcome, RecoveryStatus, RedactedCandidateInput, RetrySafety, StateChangeRef,
-    StateObservation, ToolCallFact, ToolCallStatus, ToolRequirement,
+    FindingCertaintyV1, FindingSeverity, NormalizedToolError, OperationEffect, OutcomeClaim,
+    PolicyDecision, PolicyDecisionOutcome, RecoveryStatus, RedactedCandidateInput, RetrySafety,
+    RuleMatchCertaintyV1, StateChangeRef, StateObservation, ToolCallFact, ToolCallStatus,
+    ToolRequirement,
 };
 pub use normalizer::{AgentBehaviorNormalizer, OpenInferenceBehaviorNormalizer};
+pub use presentation::{
+    FINDING_PRESENTATION_SCHEMA_VERSION, FindingEvidenceRoleV1, FindingPresentationV1,
+    FindingPresenter, PresentedEvidenceV1,
+};
 pub use projection::{
     DEFAULT_FINDING_PROJECTION_VERSION, FINDING_PROJECTION_SCHEMA_VERSION, FindingProjection,
     FindingRedactor, SafeFindingProjector, ScalarFindingRedactor, finding_projection_cases,

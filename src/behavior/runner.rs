@@ -261,6 +261,7 @@ mod tests {
             started_at: Some("2026-07-10T12:00:00Z".to_string()),
             ended_at: Some("2026-07-10T12:00:02Z".to_string()),
             attributes: root_attributes,
+            ..Span::new("", "")
         };
         let mut tool_attributes = BTreeMap::new();
         tool_attributes.insert("gen_ai.tool.name".to_string(), json!("cancelCard"));
@@ -286,6 +287,7 @@ mod tests {
             started_at: Some("2026-07-10T12:00:01Z".to_string()),
             ended_at: Some("2026-07-10T12:00:02Z".to_string()),
             attributes: tool_attributes,
+            ..Span::new("", "")
         };
         Trace::new("trace-1").with_span(root).with_span(tool)
     }
@@ -309,7 +311,9 @@ mod tests {
         assert_eq!(stats.processed_trace_count, 2);
         assert_eq!(stats.written_finding_count, 3);
         assert_eq!(stats.skipped_finding_count, 3);
-        assert_eq!(stats.detector_versions.len(), 10);
+        assert_eq!(stats.detector_versions, detectors.detector_versions());
+        assert!(!stats.detector_versions.contains_key("missing_resolution"));
+        assert!(!stats.detector_versions.contains_key("excessive_tool_usage"));
         assert_eq!(sink.finding_ids.len(), 3);
         assert_eq!(sink.checkpoints.len(), 2);
         assert_eq!(

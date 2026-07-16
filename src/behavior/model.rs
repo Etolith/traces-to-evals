@@ -3,9 +3,11 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::input::{BehaviorInputCoverageV1, BehaviorInputProvenanceV1};
+use crate::model::FactQuality;
 use crate::{Result, TraceEvalError};
 
-pub const AGENT_BEHAVIOR_TRACE_SCHEMA_VERSION: &str = "traceeval.agent_behavior_trace.v1";
+pub const AGENT_BEHAVIOR_TRACE_SCHEMA_VERSION: &str = "traceeval.agent_behavior_trace.v2";
 pub const BEHAVIOR_FINDING_SCHEMA_VERSION: &str = "agent.behavior.finding.v1";
 pub const EVAL_CANDIDATE_SCHEMA_VERSION: &str = "traceeval.eval_candidate.v1";
 
@@ -123,8 +125,20 @@ pub struct NormalizedToolError {
 pub struct ToolCallFact {
     pub call_id: String,
     pub tool_name: String,
+    #[serde(default)]
+    pub tool_name_source_quality: FactQuality,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operation: Option<String>,
+    #[serde(default)]
+    pub operation_source_quality: FactQuality,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invocation_fingerprint: Option<String>,
+    #[serde(default)]
+    pub invocation_fingerprint_quality: FactQuality,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result_fingerprint: Option<String>,
+    #[serde(default)]
+    pub result_fingerprint_quality: FactQuality,
     #[serde(default)]
     pub effect: OperationEffect,
     #[serde(default)]
@@ -134,9 +148,15 @@ pub struct ToolCallFact {
     #[serde(default = "default_attempt")]
     pub attempt: u32,
     pub started_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at_unix_nano: Option<u64>,
     #[serde(default)]
     pub duration_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_nano: Option<u64>,
     pub status: ToolCallStatus,
+    #[serde(default)]
+    pub status_quality: FactQuality,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<NormalizedToolError>,
     #[serde(default)]
@@ -272,6 +292,8 @@ impl Default for FinalOutcome {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AgentBehaviorTrace {
     pub schema_version: String,
+    #[serde(default = "legacy_input_schema_version")]
+    pub input_schema_version: String,
     pub trace_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_summary: Option<String>,
@@ -283,6 +305,12 @@ pub struct AgentBehaviorTrace {
     pub policy_decisions: Vec<PolicyDecision>,
     pub final_outcome: FinalOutcome,
     #[serde(default)]
+    pub coverage: BehaviorInputCoverageV1,
+    #[serde(default)]
+    pub provenance: BehaviorInputProvenanceV1,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observed_at_unix_nano: Option<u64>,
+    #[serde(default)]
     pub evidence: Vec<EvidenceRef>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub metadata: BTreeMap<String, Value>,
@@ -292,16 +320,24 @@ impl AgentBehaviorTrace {
     pub fn new(trace_id: impl Into<String>) -> Self {
         Self {
             schema_version: AGENT_BEHAVIOR_TRACE_SCHEMA_VERSION.to_string(),
+            input_schema_version: legacy_input_schema_version(),
             trace_id: trace_id.into(),
             input_summary: None,
             turns: Vec::new(),
             tool_calls: Vec::new(),
             policy_decisions: Vec::new(),
             final_outcome: FinalOutcome::default(),
+            coverage: BehaviorInputCoverageV1::default(),
+            provenance: BehaviorInputProvenanceV1::default(),
+            observed_at_unix_nano: None,
             evidence: Vec::new(),
             metadata: BTreeMap::new(),
         }
     }
+}
+
+fn legacy_input_schema_version() -> String {
+    "traceeval.legacy_trace_projection.v1".into()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -333,14 +369,48 @@ pub struct BehaviorFinding {
     pub kind: String,
     pub severity: FindingSeverity,
     pub recovery: RecoveryStatus,
+    /// Compatibility field for v1 consumers. Deterministic detectors leave this unset;
+    /// probabilistic detectors must also populate `certainty.calibrated_failure_risk`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub confidence: Option<f32>,
+    #[serde(default)]
+    pub certainty: FindingCertaintyV1,
     pub failure_signature: String,
     #[serde(default)]
     pub evidence: Vec<EvidenceRef>,
     pub created_at: String,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub metadata: BTreeMap<String, Value>,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuleMatchCertaintyV1 {
+    Exact,
+    BoundedInference,
+    #[default]
+    Inconclusive,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FindingCertaintyV1 {
+    pub rule_match: RuleMatchCertaintyV1,
+    pub semantic_coverage: f32,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub missing_facts: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub calibrated_failure_risk: Option<f32>,
+}
+
+impl Default for FindingCertaintyV1 {
+    fn default() -> Self {
+        Self {
+            rule_match: RuleMatchCertaintyV1::Inconclusive,
+            semantic_coverage: 0.0,
+            missing_facts: Vec::new(),
+            calibrated_failure_risk: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

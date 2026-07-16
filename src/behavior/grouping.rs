@@ -136,6 +136,7 @@ mod tests {
             severity: FindingSeverity::High,
             recovery: RecoveryStatus::Unrecovered,
             confidence: Some(1.0),
+            certainty: crate::behavior::FindingCertaintyV1::default(),
             failure_signature: "sha256:same".to_string(),
             evidence: vec![EvidenceRef::span(format!("{id}-span"))],
             created_at: created_at.to_string(),

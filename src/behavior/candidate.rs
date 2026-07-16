@@ -202,6 +202,41 @@ impl EvalCandidateGenerator for FindingEvalCandidateGenerator {
 }
 
 impl EvalCandidate {
+    /// Returns a new unreviewed candidate definition with stable semantic cohort provenance.
+    ///
+    /// Cluster references are part of the immutable definition, so changing them must also
+    /// recompute the definition and candidate identities instead of mutating the generated
+    /// record in place.
+    pub fn with_source_cluster_refs(
+        mut self,
+        mut source_cluster_refs: Vec<String>,
+    ) -> Result<Self> {
+        self.require_status(
+            EvalCandidateStatus::Candidate,
+            "attach source cluster references",
+        )?;
+        source_cluster_refs.sort();
+        source_cluster_refs.dedup();
+        self.source_cluster_refs = source_cluster_refs;
+        self.definition_hash = candidate_definition_hash(&CandidateDefinition {
+            source_trace_id: &self.source_trace_id,
+            source_finding_ids: &self.source_finding_ids,
+            source_cluster_refs: &self.source_cluster_refs,
+            evidence_packet_id: self.evidence_packet_id.as_deref(),
+            proposed_input: self.proposed_input.as_ref(),
+            proposed_expected_behavior: &self.proposed_expected_behavior,
+            proposed_rubric: &self.proposed_rubric,
+            proposed_grader: &self.proposed_grader,
+            generator: &self.generator,
+        });
+        self.candidate_id = hash_parts(self.source_finding_ids.iter().map(String::as_str).chain([
+            self.generator.name.as_str(),
+            self.generator.version.as_str(),
+            self.definition_hash.as_str(),
+        ]));
+        Ok(self)
+    }
+
     pub fn record_review(mut self, review: CandidateReview) -> Result<Self> {
         self.require_status(EvalCandidateStatus::Candidate, "record review")?;
         self.validate_definition_hash()?;
@@ -328,6 +363,7 @@ mod tests {
             severity: FindingSeverity::High,
             recovery: RecoveryStatus::Unrecovered,
             confidence: Some(1.0),
+            certainty: crate::behavior::FindingCertaintyV1::default(),
             failure_signature: "signature-1".to_string(),
             evidence: Vec::new(),
             created_at: "2026-07-10T12:00:00Z".to_string(),
@@ -369,6 +405,7 @@ mod tests {
             severity: FindingSeverity::Medium,
             recovery: RecoveryStatus::Unrecovered,
             confidence: Some(1.0),
+            certainty: crate::behavior::FindingCertaintyV1::default(),
             failure_signature: "signature-1".to_string(),
             evidence: Vec::new(),
             created_at: "2026-07-10T12:00:00Z".to_string(),
@@ -424,6 +461,7 @@ mod tests {
             severity: FindingSeverity::Medium,
             recovery: RecoveryStatus::Unrecovered,
             confidence: Some(1.0),
+            certainty: crate::behavior::FindingCertaintyV1::default(),
             failure_signature: "signature-1".to_string(),
             evidence: Vec::new(),
             created_at: "2026-07-10T12:00:00Z".to_string(),

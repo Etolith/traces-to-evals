@@ -99,11 +99,48 @@ pub(super) fn build_finding(
         kind: detector.id().to_string(),
         severity,
         recovery,
-        confidence: Some(1.0),
+        confidence: None,
+        certainty: finding_certainty(trace, detector.id()),
         failure_signature,
         evidence,
         created_at,
         metadata,
+    }
+}
+
+fn finding_certainty(trace: &AgentBehaviorTrace, detector_id: &str) -> FindingCertaintyV1 {
+    if matches!(detector_id, "repeated_tool_failure" | "tool_call_loop") {
+        return FindingCertaintyV1 {
+            rule_match: RuleMatchCertaintyV1::Exact,
+            semantic_coverage: 1.0,
+            missing_facts: Vec::new(),
+            calibrated_failure_risk: None,
+        };
+    }
+    let mut missing_facts = Vec::new();
+    if trace.coverage.explicit_status_spans == 0 {
+        missing_facts.push("source_status".to_string());
+    }
+    if trace.coverage.operation_identity == FactQuality::Missing {
+        missing_facts.push("operation_identity".to_string());
+    }
+    if trace.coverage.final_outcome == FactQuality::Missing {
+        missing_facts.push("final_outcome".to_string());
+    }
+    let observed = 3usize.saturating_sub(missing_facts.len());
+    let semantic_coverage = observed as f32 / 3.0;
+    let rule_match = if missing_facts.is_empty() {
+        RuleMatchCertaintyV1::Exact
+    } else if observed == 0 {
+        RuleMatchCertaintyV1::Inconclusive
+    } else {
+        RuleMatchCertaintyV1::BoundedInference
+    };
+    FindingCertaintyV1 {
+        rule_match,
+        semantic_coverage,
+        missing_facts,
+        calibrated_failure_risk: None,
     }
 }
 

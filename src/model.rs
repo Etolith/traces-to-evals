@@ -47,6 +47,22 @@ pub struct Span {
     pub started_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ended_at: Option<String>,
+    #[serde(default)]
+    pub source_status: SourceSpanStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_time_unix_nano: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_time_unix_nano: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_nano: Option<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub events: Vec<SpanEvent>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub links: Vec<SpanLink>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub payload_identities: BTreeMap<String, PayloadIdentity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<SpanProvenance>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub attributes: BTreeMap<String, Value>,
 }
@@ -64,6 +80,14 @@ impl Span {
             error: None,
             started_at: None,
             ended_at: None,
+            source_status: SourceSpanStatus::Unset,
+            start_time_unix_nano: None,
+            end_time_unix_nano: None,
+            duration_nano: None,
+            events: Vec::new(),
+            links: Vec::new(),
+            payload_identities: BTreeMap::new(),
+            provenance: None,
             attributes: BTreeMap::new(),
         }
     }
@@ -89,6 +113,64 @@ impl Span {
         self.kind = kind;
         self
     }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceSpanStatus {
+    #[default]
+    Unset,
+    Ok,
+    Error,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SpanEvent {
+    pub identity: String,
+    pub name: String,
+    pub timestamp_unix_nano: u64,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub attributes: BTreeMap<String, Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SpanLink {
+    pub identity: String,
+    pub trace_id: String,
+    pub span_id: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub trace_state: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub attributes: BTreeMap<String, Value>,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FactQuality {
+    Explicit,
+    Derived,
+    Inferred,
+    Ambiguous,
+    #[default]
+    Missing,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PayloadIdentity {
+    pub fingerprint: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blob_id: Option<String>,
+    #[serde(default)]
+    pub original_bytes: u64,
+    #[serde(default)]
+    pub quality: FactQuality,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpanProvenance {
+    pub source_id: String,
+    pub decoder_version: String,
+    pub semantic_mapping_version: String,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

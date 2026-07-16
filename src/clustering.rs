@@ -14,8 +14,8 @@ pub use assignment::{
 };
 pub use discovery::{
     ClusterAlgorithm, ClusterDiscovery, ClusterDiscoveryInput, ClusterDiscoveryOptions,
-    ClusterModel, ClusterModelAssigner, ClusterModelSource, DiscoveredCluster, DistanceMetric,
-    EmbeddingClusterAssigner, KMeansClusterDiscovery,
+    ClusterModel, ClusterModelAssigner, ClusterModelSource, ClusterQualityEvaluation,
+    DiscoveredCluster, DistanceMetric, EmbeddingClusterAssigner, KMeansClusterDiscovery,
 };
 pub use embedding::{
     CaseEmbedding, ClusterText, ClusterTextProjector, DefaultClusterTextProjector,

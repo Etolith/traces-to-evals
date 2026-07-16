@@ -51,14 +51,24 @@ pub(super) fn span_kind(span: &Span) -> SpanKind {
     }
 }
 
-pub(super) fn tool_name(span: &Span) -> String {
+pub(super) fn tool_name(span: &Span) -> (String, FactQuality) {
     string_attribute(span, &["gen_ai.tool.name", "tool.name", "tool_name"])
-        .unwrap_or_else(|| span.name.clone())
+        .map(|name| (name, FactQuality::Explicit))
+        .unwrap_or_else(|| (span.name.clone(), FactQuality::Derived))
 }
 
 pub(super) fn explicit_operation(span: &Span) -> Option<String> {
-    string_attribute(span, &["agent.operation", "tool.operation", "operation"])
-        .filter(|operation| is_valid_semantic_label(operation))
+    string_attribute(
+        span,
+        &[
+            "gen_ai.operation.name",
+            "agent.operation",
+            "tool.operation",
+            "operation",
+            "operation.name",
+        ],
+    )
+    .filter(|operation| is_valid_semantic_label(operation))
 }
 
 pub(super) fn explicit_effect(span: &Span) -> Option<OperationEffect> {
@@ -161,6 +171,10 @@ pub(super) fn has_exception_event(span: &Span) -> bool {
     span.attributes.contains_key("exception.type")
         || span.attributes.contains_key("exception.message")
         || bool_attribute(span, &["exception.recorded"]) == Some(true)
+        || span
+            .events
+            .iter()
+            .any(|event| event.name.eq_ignore_ascii_case("exception"))
 }
 
 pub(super) fn protocol_status(span: &Span) -> Option<u16> {
@@ -184,6 +198,9 @@ pub(super) fn protocol_status(span: &Span) -> Option<u16> {
 }
 
 pub(super) fn duration_ms(span: &Span) -> u64 {
+    if let Some(duration) = duration_nano(span) {
+        return duration.saturating_add(500_000) / 1_000_000;
+    }
     for key in ["duration_ms", "tool.duration_ms", "gen_ai.tool.duration_ms"] {
         if let Some(value) = span.attributes.get(key).and_then(Value::as_u64) {
             return value;
@@ -202,6 +219,14 @@ pub(super) fn duration_ms(span: &Span) -> u64 {
         }
     }
     0
+}
+
+pub(super) fn duration_nano(span: &Span) -> Option<u64> {
+    span.duration_nano.or_else(|| {
+        span.start_time_unix_nano
+            .zip(span.end_time_unix_nano)
+            .map(|(start, end)| end.saturating_sub(start))
+    })
 }
 
 pub(super) fn string_attribute(span: &Span, keys: &[&str]) -> Option<String> {

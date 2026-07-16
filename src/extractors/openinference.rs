@@ -224,6 +224,7 @@ mod tests {
             started_at: None,
             ended_at: None,
             attributes,
+            ..Span::new("", "")
         });
 
         let case = OpenInferenceExtractor.extract_trace(&trace).unwrap();
@@ -308,6 +309,7 @@ mod tests {
                 started_at: None,
                 ended_at: None,
                 attributes: agent_attributes,
+                ..Span::new("", "")
             })
             .with_span(Span {
                 id: "tool-span".to_string(),
@@ -321,6 +323,7 @@ mod tests {
                 started_at: None,
                 ended_at: None,
                 attributes: tool_attributes,
+                ..Span::new("", "")
             });
 
         let case = OpenInferenceExtractor.extract_trace(&trace).unwrap();

@@ -6,7 +6,7 @@ use sha2::{Digest, Sha256};
 use crate::Result;
 use crate::behavior::{
     AgentBehaviorTrace, BEHAVIOR_FINDING_SCHEMA_VERSION, BehaviorFinding, EvidenceRef,
-    FindingSeverity, RecoveryStatus,
+    FindingCertaintyV1, FindingSeverity, RecoveryStatus, RuleMatchCertaintyV1,
 };
 
 use super::model::{
@@ -235,6 +235,12 @@ fn finding_from_evaluation(
         severity,
         recovery: RecoveryStatus::Unknown,
         confidence: Some(judgment.confidence),
+        certainty: FindingCertaintyV1 {
+            rule_match: RuleMatchCertaintyV1::BoundedInference,
+            semantic_coverage: 1.0,
+            missing_facts: Vec::new(),
+            calibrated_failure_risk: Some(judgment.confidence),
+        },
         failure_signature,
         evidence,
         created_at: observed_at(trace),

@@ -12,4 +12,5 @@ pub use kmeans::KMeansClusterDiscovery;
 pub use model::{CLUSTER_MODEL_SCHEMA_KIND, ClusterModel, ClusterModelSource, DiscoveredCluster};
 pub use options::{
     ClusterAlgorithm, ClusterDiscovery, ClusterDiscoveryInput, ClusterDiscoveryOptions,
+    ClusterQualityEvaluation,
 };

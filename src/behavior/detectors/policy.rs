@@ -60,7 +60,26 @@ impl TraceDetector for PolicyViolationDetector {
             .policy_decisions
             .iter()
             .filter(|decision| decision.outcome == PolicyDecisionOutcome::Denied)
-            .map(|decision| {
+            .filter_map(|decision| {
+                let denied_action = decision.action.as_deref()?;
+                let matching_calls = trace
+                    .tool_calls
+                    .iter()
+                    .filter(|call| {
+                        call.status == ToolCallStatus::Succeeded
+                            && ((matches!(
+                                call.operation_source_quality,
+                                FactQuality::Explicit | FactQuality::Derived
+                            ) && call.operation.as_deref() == Some(denied_action))
+                                || (matches!(
+                                    call.tool_name_source_quality,
+                                    FactQuality::Explicit | FactQuality::Derived
+                                ) && call.tool_name == denied_action))
+                    })
+                    .collect::<Vec<_>>();
+                if matching_calls.is_empty() {
+                    return None;
+                }
                 let mut metadata = BTreeMap::new();
                 if let Some(policy_id) = &decision.policy_id {
                     metadata.insert("policy_id".to_string(), json!(policy_id));
@@ -68,7 +87,18 @@ impl TraceDetector for PolicyViolationDetector {
                 if let Some(reason_code) = &decision.reason_code {
                     metadata.insert("reason_code".to_string(), json!(reason_code));
                 }
-                build_finding(
+                metadata.insert(
+                    "executed_call_ids".to_string(),
+                    json!(
+                        matching_calls
+                            .iter()
+                            .map(|call| call.call_id.as_str())
+                            .collect::<Vec<_>>()
+                    ),
+                );
+                let mut evidence = decision.evidence.clone();
+                evidence.extend(matching_calls.iter().flat_map(|call| call.evidence.clone()));
+                Some(build_finding(
                     trace,
                     self,
                     FindingSeverity::High,
@@ -81,9 +111,9 @@ impl TraceDetector for PolicyViolationDetector {
                         None,
                     ),
                     decision.reason_code.clone(),
-                    decision.evidence.clone(),
+                    evidence,
                     metadata,
-                )
+                ))
             })
             .collect()
     }

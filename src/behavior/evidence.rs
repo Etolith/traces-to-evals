@@ -215,6 +215,7 @@ mod tests {
             severity: FindingSeverity::Medium,
             recovery: RecoveryStatus::Unrecovered,
             confidence: Some(1.0),
+            certainty: crate::behavior::FindingCertaintyV1::default(),
             failure_signature: "sha256:signature".to_string(),
             evidence: vec![EvidenceRef::span("root")],
             created_at: "2026-07-10T12:00:00Z".to_string(),

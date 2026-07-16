@@ -57,6 +57,12 @@ pub enum TraceEvalError {
     #[error("behavior adapter {adapter_id:?} is invalid: {message}")]
     InvalidBehaviorAdapter { adapter_id: String, message: String },
 
+    #[error("behavior input for trace {trace_id:?} is invalid: {message}")]
+    InvalidBehaviorInput { trace_id: String, message: String },
+
+    #[error("detector profile {profile_id:?} is invalid: {message}")]
+    InvalidDetectorProfile { profile_id: String, message: String },
+
     #[error("eval candidate {candidate_id} transition is invalid: {message}")]
     InvalidCandidateTransition {
         candidate_id: String,

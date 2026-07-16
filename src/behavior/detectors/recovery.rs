@@ -18,7 +18,7 @@ impl RecoveryAnalyzer {
 
         let later_calls = &trace.tool_calls[call_index.saturating_add(1)..];
         let equivalent_success = later_calls.iter().any(|later| {
-            equivalent_call(call, later)
+            retry_matches(call, later)
                 && later.status == ToolCallStatus::Succeeded
                 && call.retry_safety == RetrySafety::Idempotent
         });
@@ -41,11 +41,22 @@ impl RecoveryAnalyzer {
             return RecoveryStatus::Recovered;
         }
 
-        if later_calls.iter().any(|later| {
-            later.effect == OperationEffect::Compensating
-                && later.status == ToolCallStatus::Succeeded
-        }) {
+        if later_calls
+            .iter()
+            .any(|later| compensates_call(call, later))
+        {
             return RecoveryStatus::Recovered;
+        }
+
+        if later_calls.iter().any(|later| {
+            later.status == ToolCallStatus::Succeeded
+                && later.tool_name == call.tool_name
+                && later.operation == call.operation
+                && later.effect == call.effect
+        }) {
+            // A later operation-level success is suggestive, but without a compatible
+            // invocation identity or linked state proof it cannot clear this failure.
+            return RecoveryStatus::Unknown;
         }
 
         let claims = trace
@@ -89,18 +100,40 @@ impl RecoveryAnalyzer {
     }
 }
 
-fn equivalent_call(left: &ToolCallFact, right: &ToolCallFact) -> bool {
-    match (&left.operation, &right.operation) {
-        (Some(left), Some(right)) => left == right,
-        _ => left.tool_name == right.tool_name,
-    }
+fn retry_matches(left: &ToolCallFact, right: &ToolCallFact) -> bool {
+    left.operation == right.operation
+        && left.tool_name == right.tool_name
+        && left.invocation_fingerprint.is_some()
+        && left.invocation_fingerprint == right.invocation_fingerprint
+        && left.effect == right.effect
 }
 
-pub(super) fn equivalent_call_key(call: &ToolCallFact) -> (String, String) {
-    match &call.operation {
-        Some(operation) => ("operation".to_string(), operation.clone()),
-        None => ("tool".to_string(), call.tool_name.clone()),
+pub(super) fn equivalent_call_key(call: &ToolCallFact) -> Option<(String, String, String)> {
+    if !matches!(
+        call.invocation_fingerprint_quality,
+        FactQuality::Explicit | FactQuality::Derived
+    ) {
+        return None;
     }
+    let compatible_identity = if call.operation.is_some()
+        && matches!(
+            call.operation_source_quality,
+            FactQuality::Explicit | FactQuality::Derived
+        ) {
+        format!("operation:{}", call.operation.as_ref()?)
+    } else if matches!(
+        call.tool_name_source_quality,
+        FactQuality::Explicit | FactQuality::Derived
+    ) {
+        format!("tool:{}", call.tool_name)
+    } else {
+        return None;
+    };
+    Some((
+        call.tool_name.clone(),
+        compatible_identity,
+        call.invocation_fingerprint.clone()?,
+    ))
 }
 
 pub(super) fn has_material_progress(call: &ToolCallFact) -> bool {
@@ -123,7 +156,7 @@ pub(super) fn claim_matches_call(claim: &OutcomeClaim, call: &ToolCallFact) -> b
     if let Some(operation) = &claim.operation {
         return call.operation.as_ref() == Some(operation);
     }
-    true
+    false
 }
 
 fn verifies_call_state(call: &ToolCallFact, later: &ToolCallFact) -> bool {
@@ -146,8 +179,25 @@ fn verifies_call_state(call: &ToolCallFact, later: &ToolCallFact) -> bool {
             .and_then(|state| state.predicate.as_ref()),
     ) {
         (Some(expected), Some(observed)) => expected == observed,
-        (Some(_), None) => false,
-        _ => true,
+        _ => false,
+    }
+}
+
+fn compensates_call(call: &ToolCallFact, later: &ToolCallFact) -> bool {
+    if later.effect != OperationEffect::Compensating || later.status != ToolCallStatus::Succeeded {
+        return false;
+    }
+    match (
+        call.state_change
+            .as_ref()
+            .and_then(|state| state.predicate.as_ref()),
+        later
+            .state_change
+            .as_ref()
+            .and_then(|state| state.predicate.as_ref()),
+    ) {
+        (Some(expected), Some(compensated)) => expected == compensated,
+        _ => false,
     }
 }
 

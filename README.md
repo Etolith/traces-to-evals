@@ -2,6 +2,10 @@
 
 `traces-to-evals` turns GenAI execution traces into reusable evaluation cases, then evaluates, calibrates, aggregates, or exports those cases.
 
+Licensed under GPL-3.0-or-later. See [`LICENSE`](LICENSE). Security reports and
+contribution checks are documented in [`SECURITY.md`](SECURITY.md) and
+[`CONTRIBUTING.md`](CONTRIBUTING.md).
+
 The repository binary is currently named `traceeval`; downstream projects can
 rename the binary or wrap it without changing parser code. Persisted cluster
 artifacts also support a custom namespace through `ProjectName`, so generated

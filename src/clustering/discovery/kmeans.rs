@@ -28,7 +28,7 @@ use crate::{Result, TraceEvalError};
 
 use super::{ClusterDiscovery, ClusterDiscoveryInput, ClusterModel};
 #[cfg(feature = "clustering-linfa")]
-use super::{ClusterModelSource, DiscoveredCluster, DistanceMetric};
+use super::{ClusterModelSource, ClusterQualityEvaluation, DiscoveredCluster, DistanceMetric};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct KMeansClusterDiscovery {
@@ -79,6 +79,14 @@ impl KMeansClusterDiscovery {
         if input.options.representative_count == 0 {
             return Err(self.discovery_error("representative_count must be greater than 0"));
         }
+        if matches!(
+            input.options.quality_evaluation,
+            ClusterQualityEvaluation::Sampled { maximum_cases: 0 }
+        ) {
+            return Err(
+                self.discovery_error("sampled quality maximum_cases must be greater than 0")
+            );
+        }
 
         let embeddings = input
             .embeddings
@@ -107,7 +115,12 @@ impl KMeansClusterDiscovery {
             .map_err(|error| self.discovery_error(error.to_string()))?;
         let labels = kmeans.predict(&dataset);
         let labels = labels.iter().copied().collect::<Vec<_>>();
-        let silhouette = silhouette_scores(&records_f32, &labels, distance_metric)?;
+        let silhouette = silhouette_scores_for_evaluation(
+            &records_f32,
+            &labels,
+            distance_metric,
+            input.options.quality_evaluation,
+        )?;
         let centroids = kmeans
             .centroids()
             .outer_iter()
@@ -255,6 +268,18 @@ impl KMeansClusterDiscovery {
             quality,
         );
         model.metadata = input.options.metadata.clone();
+        model.metadata.insert(
+            "cluster_quality_evaluation".into(),
+            Value::String(input.options.quality_evaluation.name().into()),
+        );
+        if let ClusterQualityEvaluation::Sampled { maximum_cases } =
+            input.options.quality_evaluation
+        {
+            model.metadata.insert(
+                "cluster_quality_maximum_cases".into(),
+                Value::from(maximum_cases as u64),
+            );
+        }
         model.validate()?;
         Ok(model)
     }
@@ -368,7 +393,7 @@ fn silhouette_scores(
     labels: &[usize],
     distance_metric: DistanceMetric,
 ) -> Result<Option<(f32, BTreeMap<usize, f32>)>> {
-    if records.len() <= 1 || records.len() > 10_000 {
+    if records.len() <= 1 {
         return Ok(None);
     }
 
@@ -432,6 +457,102 @@ fn silhouette_scores(
         silhouette_sum / records.len() as f32,
         cluster_scores,
     )))
+}
+
+#[cfg(feature = "clustering-linfa")]
+fn silhouette_scores_for_evaluation(
+    records: &[Vec<f32>],
+    labels: &[usize],
+    distance_metric: DistanceMetric,
+    evaluation: ClusterQualityEvaluation,
+) -> Result<Option<(f32, BTreeMap<usize, f32>)>> {
+    match evaluation {
+        ClusterQualityEvaluation::Disabled => Ok(None),
+        ClusterQualityEvaluation::Exact => silhouette_scores(records, labels, distance_metric),
+        ClusterQualityEvaluation::Sampled { maximum_cases } => {
+            let indices = stratified_quality_sample(labels, maximum_cases);
+            if indices.len() == records.len() {
+                return silhouette_scores(records, labels, distance_metric);
+            }
+            let sampled_records = indices
+                .iter()
+                .map(|index| records[*index].clone())
+                .collect::<Vec<_>>();
+            let sampled_labels = indices
+                .iter()
+                .map(|index| labels[*index])
+                .collect::<Vec<_>>();
+            silhouette_scores(&sampled_records, &sampled_labels, distance_metric)
+        }
+    }
+}
+
+#[cfg(feature = "clustering-linfa")]
+fn stratified_quality_sample(labels: &[usize], maximum_cases: usize) -> Vec<usize> {
+    if labels.len() <= maximum_cases {
+        return (0..labels.len()).collect();
+    }
+    let mut by_cluster = BTreeMap::<usize, Vec<usize>>::new();
+    for (index, label) in labels.iter().copied().enumerate() {
+        by_cluster.entry(label).or_default().push(index);
+    }
+    let mut offsets = BTreeMap::<usize, usize>::new();
+    let mut sampled = Vec::with_capacity(maximum_cases);
+    while sampled.len() < maximum_cases {
+        let mut added = false;
+        for (label, indices) in &by_cluster {
+            let offset = offsets.entry(*label).or_default();
+            if let Some(index) = indices.get(*offset) {
+                sampled.push(*index);
+                *offset += 1;
+                added = true;
+                if sampled.len() == maximum_cases {
+                    break;
+                }
+            }
+        }
+        if !added {
+            break;
+        }
+    }
+    sampled.sort_unstable();
+    sampled
+}
+
+#[cfg(all(test, feature = "clustering-linfa"))]
+mod quality_evaluation_tests {
+    use super::*;
+
+    #[test]
+    fn sampled_quality_is_deterministic_stratified_and_bounded() {
+        let labels = [0, 0, 0, 1, 1, 1, 2, 2, 2, 2];
+        let first = stratified_quality_sample(&labels, 6);
+        let second = stratified_quality_sample(&labels, 6);
+
+        assert_eq!(first, second);
+        assert_eq!(first.len(), 6);
+        assert!(
+            [0, 1, 2]
+                .into_iter()
+                .all(|label| first.iter().any(|index| labels[*index] == label))
+        );
+    }
+
+    #[test]
+    fn disabled_quality_skips_silhouette_work() {
+        let records = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
+        let labels = vec![0, 1];
+        assert!(
+            silhouette_scores_for_evaluation(
+                &records,
+                &labels,
+                DistanceMetric::Cosine,
+                ClusterQualityEvaluation::Disabled,
+            )
+            .unwrap()
+            .is_none()
+        );
+    }
 }
 
 #[cfg(feature = "clustering-linfa")]

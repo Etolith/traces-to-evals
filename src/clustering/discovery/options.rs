@@ -31,6 +31,8 @@ pub struct ClusterDiscoveryOptions {
     pub distance_metric: DistanceMetric,
     pub representative_count: usize,
     pub random_seed: u64,
+    #[serde(default)]
+    pub quality_evaluation: ClusterQualityEvaluation,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub novelty_distance_threshold: Option<f32>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -50,8 +52,35 @@ impl Default for ClusterDiscoveryOptions {
             distance_metric: DistanceMetric::Cosine,
             representative_count: 5,
             random_seed: 42,
+            quality_evaluation: ClusterQualityEvaluation::default(),
             novelty_distance_threshold: None,
             metadata: BTreeMap::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ClusterQualityEvaluation {
+    Disabled,
+    Sampled { maximum_cases: usize },
+    Exact,
+}
+
+impl Default for ClusterQualityEvaluation {
+    fn default() -> Self {
+        Self::Sampled {
+            maximum_cases: 1_000,
+        }
+    }
+}
+
+impl ClusterQualityEvaluation {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Disabled => "disabled",
+            Self::Sampled { .. } => "sampled",
+            Self::Exact => "exact",
         }
     }
 }
