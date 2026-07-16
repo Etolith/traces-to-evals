@@ -81,6 +81,7 @@ pub(super) fn build_finding(
         .get("observed_at")
         .and_then(Value::as_str)
         .map(str::to_string)
+        .or_else(|| trace.observed_at_unix_nano.map(|value| value.to_string()))
         .or_else(|| {
             trace
                 .tool_calls
@@ -159,4 +160,44 @@ fn hash_parts<'a>(parts: impl IntoIterator<Item = &'a str>) -> String {
         hasher.update(part.as_bytes());
     }
     format!("sha256:{:x}", hasher.finalize())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct TestDetector;
+
+    impl TraceDetector for TestDetector {
+        fn id(&self) -> &'static str {
+            "test"
+        }
+
+        fn version(&self) -> &'static str {
+            "1"
+        }
+
+        fn detect(&self, _trace: &AgentBehaviorTrace) -> Vec<BehaviorFinding> {
+            Vec::new()
+        }
+    }
+
+    #[test]
+    fn numeric_observation_time_is_used_when_text_timestamp_is_absent() {
+        let mut trace = AgentBehaviorTrace::new("trace-1");
+        trace.observed_at_unix_nano = Some(1_767_225_600_000_000_000);
+
+        let finding = build_finding(
+            &trace,
+            &TestDetector,
+            FindingSeverity::High,
+            RecoveryStatus::Unrecovered,
+            ("tool".to_string(), Some("write".to_string())),
+            None,
+            Vec::new(),
+            BTreeMap::new(),
+        );
+
+        assert_eq!(finding.created_at, "1767225600000000000");
+    }
 }
