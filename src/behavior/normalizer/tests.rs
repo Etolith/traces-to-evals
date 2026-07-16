@@ -244,7 +244,7 @@ fn explicit_error_status_normalizes_as_failure() {
 }
 
 #[test]
-fn conservative_v2_detector_v5_tolerates_multiple_roots_and_parent_cycles() {
+fn conservative_v2_detector_v6_tolerates_multiple_roots_and_parent_cycles() {
     let mut root_a = Span::new("root-a", "planner").with_kind(SpanKind::Agent);
     root_a
         .attributes
@@ -294,6 +294,6 @@ fn conservative_v2_detector_v5_tolerates_multiple_roots_and_parent_cycles() {
         report
             .detector_versions
             .values()
-            .all(|version| version == "5")
+            .all(|version| version == "6")
     );
 }

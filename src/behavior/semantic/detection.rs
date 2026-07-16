@@ -300,6 +300,7 @@ fn observed_at(trace: &AgentBehaviorTrace) -> String {
         .get("observed_at")
         .and_then(Value::as_str)
         .map(str::to_string)
+        .or_else(|| trace.observed_at_unix_nano.map(|value| value.to_string()))
         .or_else(|| {
             trace
                 .tool_calls

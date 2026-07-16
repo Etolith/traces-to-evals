@@ -29,7 +29,7 @@ use recovery::{
 };
 use support::{build_finding, error_kind, finding_for_call, signature_subject};
 
-pub const DETERMINISTIC_DETECTOR_VERSION: &str = "5";
+pub const DETERMINISTIC_DETECTOR_VERSION: &str = "6";
 
 pub trait TraceDetector: Send + Sync {
     fn id(&self) -> &str;
@@ -814,6 +814,7 @@ fn fact_is_observed(trace: &AgentBehaviorTrace, fact: &str) -> bool {
         "tool_requirement" => trace
             .tool_calls
             .iter()
+            .filter(|call| call.status.is_failure())
             .all(|call| call.requirement != ToolRequirement::Unknown),
         "state_observation" => trace.tool_calls.iter().all(|call| {
             call.effect != OperationEffect::Mutating
