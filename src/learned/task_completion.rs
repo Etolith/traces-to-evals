@@ -244,17 +244,12 @@ impl TaskCompletionProjectionV1 {
     }
 
     pub fn projector_release_id(&self) -> Result<String, ContractError> {
-        canonical_content_id(
-            "traceeval.task-completion-projector-release.v1",
-            &serde_json::json!({
-                "projector_version": self.projector_version,
-                "content_policy": self.content_policy,
-                "max_tool_observations": self.max_tool_observations,
-                "max_summary_bytes": self.max_summary_bytes,
-                "truncation_policy": "abstain_on_material_truncation",
-                "ordering": "start_time_unix_nano_then_span_id",
-            }),
-        )
+        TaskCompletionProjectorV1 {
+            content_policy: self.content_policy,
+            max_tool_observations: self.max_tool_observations,
+            max_summary_bytes: self.max_summary_bytes,
+        }
+        .release_id()
     }
 }
 
@@ -536,6 +531,23 @@ impl Default for TaskCompletionProjectorV1 {
 }
 
 impl TaskCompletionProjectorV1 {
+    pub fn release_id(&self) -> Result<String, ContractError> {
+        if self.max_tool_observations == 0 || self.max_summary_bytes == 0 {
+            return Err(task_error("projector bounds must be greater than zero"));
+        }
+        canonical_content_id(
+            "traceeval.task-completion-projector-release.v1",
+            &serde_json::json!({
+                "projector_version": TASK_COMPLETION_PROJECTOR_VERSION,
+                "content_policy": self.content_policy,
+                "max_tool_observations": self.max_tool_observations,
+                "max_summary_bytes": self.max_summary_bytes,
+                "truncation_policy": "abstain_on_material_truncation",
+                "ordering": "start_time_unix_nano_then_span_id",
+            }),
+        )
+    }
+
     pub fn project(
         &self,
         target_key: &str,
