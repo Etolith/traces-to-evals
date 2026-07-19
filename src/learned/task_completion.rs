@@ -518,7 +518,7 @@ pub struct TaskCompletionExecutionV1 {
     pub provider: Option<ProviderResponseEnvelopeV1>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskCompletionProjectorV1 {
     pub content_policy: TaskCompletionContentPolicyV1,
     pub max_tool_observations: u32,
