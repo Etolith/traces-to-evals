@@ -5,6 +5,7 @@ use super::ContractError;
 
 pub const EVALUATOR_RELEASE_HASH_DOMAIN: &str = "traceeval.evaluator-release.v1";
 pub const AGENT_CONTEXT_RELEASE_HASH_DOMAIN: &str = "perseval.agent-context-release.v1";
+pub const CONTEXT_PROJECTION_HASH_DOMAIN: &str = "traceeval.context-projection.v1";
 pub const TRACE_CONTEXT_BINDING_HASH_DOMAIN: &str = "perseval.trace-context-binding.v1";
 pub const AGENT_TAXONOMY_RELEASE_HASH_DOMAIN: &str = "perseval.agent-taxonomy-release.v1";
 pub const TAXONOMY_ASSIGNMENT_HASH_DOMAIN: &str = "perseval.taxonomy-assignment.v1";

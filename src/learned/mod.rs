@@ -1,13 +1,21 @@
+mod calibration;
 mod canonical;
 mod context;
 mod evaluation;
 mod evaluator;
 mod provider;
+mod task_completion;
 mod taxonomy;
 
+pub use calibration::{
+    BINARY_CALIBRATION_MODEL_SCHEMA_VERSION, BinaryCalibrationExampleV1,
+    BinaryCalibrationFitOptionsV1, BinaryCalibrationModelV1, BinaryCalibrationReportV1,
+    BinaryPredictionV1, CalibrationBinV1, CalibrationDataSplitV1, ConfusionMatrixV1,
+    LearnedCalibrationFeaturesV1, SelectiveRiskPointV1,
+};
 pub use canonical::{
     AGENT_CONTEXT_RELEASE_HASH_DOMAIN, AGENT_TAXONOMY_RELEASE_HASH_DOMAIN,
-    EVALUATOR_RELEASE_HASH_DOMAIN, TAXONOMY_ASSIGNMENT_HASH_DOMAIN,
+    CONTEXT_PROJECTION_HASH_DOMAIN, EVALUATOR_RELEASE_HASH_DOMAIN, TAXONOMY_ASSIGNMENT_HASH_DOMAIN,
     TRACE_CONTEXT_BINDING_HASH_DOMAIN, canonical_content_id, canonical_json_bytes,
 };
 pub use context::{
@@ -33,6 +41,15 @@ pub use provider::{
     CHAT_COMPLETION_ENVELOPE_SCHEMA_VERSION, ChatCompletionEnvelopeV1, ProviderExecutionFailureV1,
     ProviderExecutionStageV1, ProviderResponseEnvelopeV1, ProviderTokenUsageV1,
 };
+pub use task_completion::{
+    TASK_COMPLETION_JUDGMENT_SCHEMA_VERSION, TASK_COMPLETION_PROJECTION_SCHEMA_VERSION,
+    TASK_COMPLETION_PROJECTOR_VERSION, TaskCompletionCapabilityV1, TaskCompletionContentPolicyV1,
+    TaskCompletionCriterionJudgmentV1, TaskCompletionCriterionOutcomeV1,
+    TaskCompletionCriterionSpecV1, TaskCompletionDeclaredFieldV1, TaskCompletionEvaluator,
+    TaskCompletionExecutionV1, TaskCompletionJudgmentV1, TaskCompletionOutcomeV1,
+    TaskCompletionProjectionV1, TaskCompletionProjectorV1, TaskCompletionToolObservationV1,
+    TaskCompletionTraceObservationV1,
+};
 pub use taxonomy::{
     AGENT_TAXONOMY_RELEASE_SCHEMA_VERSION, AgentTaxonomyReleaseV1, TaxonomyAssignmentSourceV1,
     TaxonomyAssignmentV1, TaxonomyDimensionV1, TaxonomyLineageOperationV1, TaxonomyNodeStateV1,
@@ -51,6 +68,10 @@ pub enum ContractError {
     InvalidTaxonomy(String),
     #[error("invalid learned evaluation: {0}")]
     InvalidEvaluation(String),
+    #[error("invalid learned calibration: {0}")]
+    InvalidCalibration(String),
+    #[error("invalid task-completion contract: {0}")]
+    InvalidTaskCompletion(String),
     #[error("invalid provider envelope: {0}")]
     InvalidProvider(String),
 }
