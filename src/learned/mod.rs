@@ -41,6 +41,8 @@ pub use provider::{
     CHAT_COMPLETION_ENVELOPE_SCHEMA_VERSION, ChatCompletionEnvelopeV1, ProviderExecutionFailureV1,
     ProviderExecutionStageV1, ProviderResponseEnvelopeV1, ProviderTokenUsageV1,
 };
+#[cfg(feature = "llm-judge-openai")]
+pub use task_completion::OpenAiTaskCompletionEvaluator;
 pub use task_completion::{
     TASK_COMPLETION_JUDGMENT_SCHEMA_VERSION, TASK_COMPLETION_PROJECTION_SCHEMA_VERSION,
     TASK_COMPLETION_PROJECTOR_VERSION, TaskCompletionCapabilityV1, TaskCompletionContentPolicyV1,

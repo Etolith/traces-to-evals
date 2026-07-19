@@ -106,6 +106,8 @@ pub use evaluation::{
     AsyncEvaluator, EvaluationCriteria, EvaluationResult, EvaluationRun, Evaluator, RunScore,
     ScoreScale, WeightedAggregate,
 };
+#[cfg(feature = "llm-judge-openai")]
+pub use learned::OpenAiTaskCompletionEvaluator;
 pub use learned::{
     AGENT_CONTEXT_RELEASE_SCHEMA_VERSION, AGENT_TAXONOMY_RELEASE_SCHEMA_VERSION,
     AgentArchitectureContextV1, AgentCapabilityV1, AgentContextReleaseV1, AgentEvaluationContextV1,
@@ -141,6 +143,9 @@ pub use model::{
     SpanProvenance, Trace,
 };
 pub use project::{DEFAULT_PROJECT_NAME, ProjectName};
+pub use providers::chat::{ChatClient, ChatRequest, ResponseSchema};
+#[cfg(any(feature = "llm-judge-openai", feature = "cluster-label-openai"))]
+pub use providers::openai_dive::chat::OpenAiChatClient;
 pub use report::{
     CalibrationImpact, ClusterIssue, ClusterScore, EvaluationReport, EvaluatorScore, FailedCase,
 };
@@ -275,4 +280,6 @@ pub mod prelude {
     pub use crate::validation::{
         ValidationIssue, ValidationProfile, ValidationReport, ValidationSeverity,
     };
+    #[cfg(feature = "llm-judge-openai")]
+    pub use crate::{OpenAiChatClient, OpenAiTaskCompletionEvaluator};
 }

@@ -872,6 +872,28 @@ pub struct TaskCompletionEvaluator<C> {
     evaluator_release: EvaluatorReleaseSpecV1,
 }
 
+#[cfg(feature = "llm-judge-openai")]
+pub type OpenAiTaskCompletionEvaluator =
+    TaskCompletionEvaluator<crate::providers::openai_dive::chat::OpenAiChatClient>;
+
+#[cfg(feature = "llm-judge-openai")]
+impl OpenAiTaskCompletionEvaluator {
+    /// Creates the production OpenAI-backed evaluator. The API key is read by
+    /// the provider client from `OPENAI_API_KEY`; it is never serialized into
+    /// the evaluator release or provider response envelope.
+    pub fn from_env(
+        model: impl Into<String>,
+        evaluator_release: EvaluatorReleaseSpecV1,
+    ) -> Result<Self, ContractError> {
+        let model = model.into();
+        Self::new(
+            crate::providers::openai_dive::chat::OpenAiChatClient::from_env(),
+            model,
+            evaluator_release,
+        )
+    }
+}
+
 impl<C> TaskCompletionEvaluator<C>
 where
     C: ChatClient,
