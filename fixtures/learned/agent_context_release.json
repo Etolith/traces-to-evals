@@ -1,0 +1,189 @@
+{
+  "schema_version": "traceeval.agent_context_release.v1",
+  "agent_id": "agent:triage",
+  "identity": {
+    "application_name": {
+      "field_id": "identity.application_name",
+      "provenance": "user_declared",
+      "source_snapshot_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "source_locator": "README.md#agent",
+      "captured_at": "2026-07-19T00:00:00Z",
+      "review_state": "approved",
+      "sensitivity": "internal",
+      "value": "Triage agent"
+    },
+    "owner": {
+      "field_id": "identity.owner",
+      "provenance": "user_declared",
+      "source_snapshot_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "captured_at": "2026-07-19T00:00:00Z",
+      "review_state": "approved",
+      "sensitivity": "internal",
+      "value": "Reliability"
+    },
+    "environment": {
+      "field_id": "identity.environment",
+      "provenance": "config_import",
+      "source_snapshot_id": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "captured_at": "2026-07-19T00:00:00Z",
+      "review_state": "approved",
+      "sensitivity": "internal",
+      "value": "production"
+    },
+    "build_version_selectors": [
+      {
+        "field_id": "identity.build_selector.main",
+        "provenance": "config_import",
+        "source_snapshot_id": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "captured_at": "2026-07-19T00:00:00Z",
+        "review_state": "approved",
+        "sensitivity": "internal",
+        "value": {"branch": "main"}
+      }
+    ],
+    "entry_points": [],
+    "user_personas": [
+      {
+        "field_id": "identity.persona.engineer",
+        "provenance": "user_declared",
+        "source_snapshot_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "captured_at": "2026-07-19T00:00:00Z",
+        "review_state": "approved",
+        "sensitivity": "internal",
+        "value": "engineer"
+      }
+    ],
+    "supported_domains": [],
+    "languages": [],
+    "risk_tier": {
+      "field_id": "identity.risk_tier",
+      "provenance": "user_declared",
+      "source_snapshot_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "captured_at": "2026-07-19T00:00:00Z",
+      "review_state": "approved",
+      "sensitivity": "internal",
+      "value": "medium"
+    }
+  },
+  "intent": {
+    "purpose": {
+      "field_id": "intent.purpose",
+      "provenance": "user_declared",
+      "source_snapshot_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "captured_at": "2026-07-19T00:00:00Z",
+      "review_state": "approved",
+      "sensitivity": "internal",
+      "value": "Investigate trace failures"
+    },
+    "supported_tasks": [
+      {
+        "field_id": "intent.task.investigate",
+        "provenance": "user_declared",
+        "source_snapshot_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "captured_at": "2026-07-19T00:00:00Z",
+        "review_state": "approved",
+        "sensitivity": "internal",
+        "value": "Investigate"
+      }
+    ],
+    "success_criteria": [
+      {
+        "field_id": "intent.criterion.evidence",
+        "provenance": "user_declared",
+        "source_snapshot_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "captured_at": "2026-07-19T00:00:00Z",
+        "review_state": "approved",
+        "sensitivity": "internal",
+        "criterion_id": "criterion:evidence",
+        "description": "Cites exact trace evidence",
+        "importance": "must",
+        "required_evidence_kinds": ["span"],
+        "business_impact_weight": 1.0
+      }
+    ],
+    "escalation_requirements": [
+      {
+        "field_id": "intent.escalation.security",
+        "provenance": "user_declared",
+        "source_snapshot_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "captured_at": "2026-07-19T00:00:00Z",
+        "review_state": "approved",
+        "sensitivity": "internal",
+        "value": "Escalate security incidents"
+      }
+    ]
+  },
+  "capabilities": [
+    {
+      "field_id": "capability.trace_read",
+      "provenance": "tool_schema",
+      "source_snapshot_id": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "captured_at": "2026-07-19T00:00:00Z",
+      "review_state": "approved",
+      "sensitivity": "internal",
+      "capability_id": "capability:trace_read",
+      "name": "Read traces",
+      "kind": "tool",
+      "effect": "read_only",
+      "idempotency": "idempotent",
+      "argument_schema_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+      "result_schema_digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+      "permissions": ["trace:read"],
+      "allowed_operations": ["read_trace"],
+      "required_preconditions": ["project_selected"],
+      "budgets": {"max_calls": 10},
+      "requires_approval": false
+    }
+  ],
+  "architecture": {
+    "expected_causal_topology": [
+      {
+        "field_id": "architecture.topology",
+        "provenance": "system_inferred",
+        "source_snapshot_id": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+        "captured_at": "2026-07-19T00:00:00Z",
+        "review_state": "approved",
+        "sensitivity": "internal",
+        "inference_confidence": 0.9,
+        "value": ["agent", "tool"]
+      }
+    ]
+  },
+  "policy": {
+    "external_provider_permissions": [
+      {
+        "field_id": "policy.external_provider",
+        "provenance": "user_declared",
+        "source_snapshot_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "captured_at": "2026-07-19T00:00:00Z",
+        "review_state": "approved",
+        "sensitivity": "internal",
+        "value": {"allowed": false}
+      }
+    ],
+    "learned_feature_content": [
+      {
+        "field_id": "policy.learned_content",
+        "provenance": "user_declared",
+        "source_snapshot_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "captured_at": "2026-07-19T00:00:00Z",
+        "review_state": "approved",
+        "sensitivity": "internal",
+        "value": ["structural_only"]
+      }
+    ]
+  },
+  "evaluation_context": {
+    "required_evidence_types": [
+      {
+        "field_id": "evaluation.required_evidence",
+        "provenance": "user_declared",
+        "source_snapshot_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "captured_at": "2026-07-19T00:00:00Z",
+        "review_state": "approved",
+        "sensitivity": "internal",
+        "value": ["span"]
+      }
+    ]
+  }
+}

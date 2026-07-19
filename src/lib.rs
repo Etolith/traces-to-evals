@@ -12,9 +12,9 @@ pub mod extractors;
 pub mod graders;
 pub mod io;
 pub mod judge;
+pub mod learned;
 pub mod model;
 pub mod project;
-#[cfg(any(feature = "llm-judge-openai", feature = "cluster-label-openai"))]
 #[doc(hidden)]
 pub mod providers;
 pub mod report;
@@ -105,6 +105,26 @@ pub use error::{Result, TraceEvalError};
 pub use evaluation::{
     AsyncEvaluator, EvaluationCriteria, EvaluationResult, EvaluationRun, Evaluator, RunScore,
     ScoreScale, WeightedAggregate,
+};
+pub use learned::{
+    AGENT_CONTEXT_RELEASE_SCHEMA_VERSION, AGENT_TAXONOMY_RELEASE_SCHEMA_VERSION,
+    AgentArchitectureContextV1, AgentCapabilityV1, AgentContextReleaseV1, AgentEvaluationContextV1,
+    AgentIdentityContextV1, AgentIntentContextV1, AgentPolicyContextV1, AgentTaxonomyReleaseV1,
+    CapabilityEffectV1, CapabilityKindV1, ChatCompletionEnvelopeV1, ContextFieldMetadataV1,
+    ContextFieldProvenanceV1, ContextFieldV1, ContextProjectionClassV1, ContextProjectionV1,
+    ContextReviewStateV1, ContextSensitivityV1, ContractError, EVALUATOR_RELEASE_SCHEMA_VERSION,
+    EvaluationCriterionV1, EvaluationEvidenceCatalogV1, EvaluationEvidenceCitationV1,
+    EvaluationEvidenceKindV1, EvaluationEvidenceLocationV1, EvaluationEvidenceRecordV1,
+    EvaluationImplementationV1, EvaluationInputBoundsV1, EvaluationTargetKind,
+    EvaluatorReleaseSpecV1, IdempotencyClassV1, LEARNED_EVALUATION_SCHEMA_VERSION,
+    LearnedAbstentionReasonV1, LearnedEvaluationV1, LearnedTaskKind, LearnedVerdictV1,
+    ProviderExecutionFailureV1, ProviderExecutionStageV1, ProviderResponseEnvelopeV1,
+    ProviderTokenUsageV1, SuccessCriterionImportanceV1, SuccessCriterionV1,
+    TRACE_CONTEXT_BINDING_SCHEMA_VERSION, TaxonomyAssignmentSourceV1, TaxonomyAssignmentV1,
+    TaxonomyDimensionV1, TaxonomyLineageOperationV1, TaxonomyNodeStateV1, TaxonomyNodeV1,
+    TaxonomyOpenSetStateV1, TaxonomyRelationKindV1, TaxonomyRelationV1,
+    TraceContextBindingProvenanceV1, TraceContextBindingResolutionV1, TraceContextBindingV1,
+    canonical_content_id, canonical_json_bytes,
 };
 pub use model::{
     EvalCase, FactQuality, PayloadIdentity, SourceSpanStatus, Span, SpanEvent, SpanKind, SpanLink,
@@ -204,6 +224,25 @@ pub mod prelude {
     pub use crate::extractors::{EvalCaseExtractor, OpenInferenceExtractor, SimpleExtractor};
     pub use crate::graders::{
         ContainsGrader, DeterministicGrader, ExactMatchGrader, NonEmptyOutputGrader,
+    };
+    pub use crate::learned::{
+        AgentArchitectureContextV1, AgentCapabilityV1, AgentContextReleaseV1,
+        AgentEvaluationContextV1, AgentIdentityContextV1, AgentIntentContextV1,
+        AgentPolicyContextV1, AgentTaxonomyReleaseV1, CapabilityEffectV1, CapabilityKindV1,
+        ChatCompletionEnvelopeV1, ContextFieldMetadataV1, ContextFieldProvenanceV1, ContextFieldV1,
+        ContextProjectionClassV1, ContextProjectionV1, ContextReviewStateV1, ContextSensitivityV1,
+        ContractError, EvaluationCriterionV1, EvaluationEvidenceCatalogV1,
+        EvaluationEvidenceCitationV1, EvaluationEvidenceKindV1, EvaluationEvidenceLocationV1,
+        EvaluationEvidenceRecordV1, EvaluationImplementationV1, EvaluationInputBoundsV1,
+        EvaluationTargetKind, EvaluatorReleaseSpecV1, IdempotencyClassV1,
+        LearnedAbstentionReasonV1, LearnedEvaluationV1, LearnedTaskKind, LearnedVerdictV1,
+        ProviderExecutionFailureV1, ProviderExecutionStageV1, ProviderResponseEnvelopeV1,
+        ProviderTokenUsageV1, SuccessCriterionImportanceV1, SuccessCriterionV1,
+        TaxonomyAssignmentSourceV1, TaxonomyAssignmentV1, TaxonomyDimensionV1,
+        TaxonomyLineageOperationV1, TaxonomyNodeStateV1, TaxonomyNodeV1, TaxonomyOpenSetStateV1,
+        TaxonomyRelationKindV1, TaxonomyRelationV1, TraceContextBindingProvenanceV1,
+        TraceContextBindingResolutionV1, TraceContextBindingV1, canonical_content_id,
+        canonical_json_bytes,
     };
     pub use crate::model::{
         EvalCase, FactQuality, PayloadIdentity, SourceSpanStatus, Span, SpanEvent, SpanKind,
