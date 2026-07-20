@@ -259,7 +259,7 @@ fn quadratic_weighted_kappa(panel: &[(&str, &str)], labels: &[String]) -> Option
 }
 
 fn agreement_error(message: impl Into<String>) -> ContractError {
-    ContractError::InvalidCalibration(message.into())
+    ContractError::InvalidAgreement(message.into())
 }
 
 #[cfg(test)]
@@ -334,6 +334,7 @@ mod tests {
             HumanAgreementReportV1::from_ratings(&[rating("a", "r1", "abstain")], &scale(false))
                 .unwrap_err();
         assert!(unknown.to_string().contains("frozen scale"));
+        assert!(matches!(unknown, ContractError::InvalidAgreement(_)));
     }
 
     #[test]

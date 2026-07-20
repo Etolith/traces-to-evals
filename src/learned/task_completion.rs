@@ -237,7 +237,15 @@ impl TaskCompletionProjectionV1 {
             ));
         }
         if self.content_policy == TaskCompletionContentPolicyV1::StructuredOnly
-            && (self.trace.input_summary.is_some()
+            && (self
+                .declared_fields
+                .iter()
+                .any(|field| field.value.is_some())
+                || self
+                    .criteria
+                    .iter()
+                    .any(|criterion| criterion.description.is_some())
+                || self.trace.input_summary.is_some()
                 || self.trace.output_summary.is_some()
                 || self
                     .tools
@@ -245,7 +253,7 @@ impl TaskCompletionProjectionV1 {
                     .any(|tool| tool.input_summary.is_some() || tool.output_summary.is_some()))
         {
             return Err(task_error(
-                "structured-only projection cannot contain free-form summaries",
+                "structured-only projection cannot contain free-form context or summaries",
             ));
         }
         if self.projector_version == TASK_COMPLETION_PROJECTOR_VERSION_V1
@@ -2106,6 +2114,30 @@ mod tests {
             evaluation.abstention_reason,
             Some(LearnedAbstentionReasonV1::ContextInsufficient)
         );
+    }
+
+    #[test]
+    fn structured_only_projection_rejects_manually_injected_context_text() {
+        let context = context();
+        let binding = binding(&context);
+        let context_projection = ContextProjectionV1 {
+            projection_class: ContextProjectionClassV1::StructuralOnly,
+            ..context_projection(&context)
+        };
+        let mut projection = TaskCompletionProjectorV1::default()
+            .project(
+                "trace-1",
+                "rev-1",
+                &binding,
+                Some(&context),
+                Some(&context_projection),
+                &trace(),
+            )
+            .unwrap();
+        projection.declared_fields[0].value = Some(json!("unredacted context"));
+
+        let error = projection.validate().unwrap_err();
+        assert!(error.to_string().contains("free-form context"));
     }
 
     #[test]

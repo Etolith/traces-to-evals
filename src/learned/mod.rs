@@ -77,6 +77,8 @@ pub enum ContractError {
     InvalidEvaluation(String),
     #[error("invalid learned calibration: {0}")]
     InvalidCalibration(String),
+    #[error("invalid human agreement report: {0}")]
+    InvalidAgreement(String),
     #[error("invalid task-completion contract: {0}")]
     InvalidTaskCompletion(String),
     #[error("invalid provider envelope: {0}")]
