@@ -22,7 +22,8 @@ use super::{
 pub const TASK_COMPLETION_PROJECTION_SCHEMA_VERSION: &str =
     "traceeval.task_completion_projection.v1";
 pub const TASK_COMPLETION_JUDGMENT_SCHEMA_VERSION: &str = "traceeval.task_completion_judgment.v1";
-pub const TASK_COMPLETION_PROJECTOR_VERSION: &str = "traceeval.task-completion-projector.v1";
+pub const TASK_COMPLETION_PROJECTOR_VERSION: &str = "traceeval.task-completion-projector.v2";
+const TASK_COMPLETION_PROJECTOR_VERSION_V1: &str = "traceeval.task-completion-projector.v1";
 const TASK_COMPLETION_PROJECTION_HASH_DOMAIN: &str = "traceeval.task-completion-projection.v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -75,6 +76,20 @@ pub struct TaskCompletionToolObservationV1 {
     pub tool_name: String,
     pub source_status: SourceSpanStatus,
     pub error_present: bool,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub structured_facts: BTreeMap<String, Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_evidence_key: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub input_truncated: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_evidence_key: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub output_truncated: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub started_at_unix_nano: Option<u64>,
     pub evidence_key: String,
@@ -90,6 +105,8 @@ pub struct TaskCompletionTraceObservationV1 {
     pub terminal_span_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal_status: Option<SourceSpanStatus>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub structured_facts: BTreeMap<String, Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_summary: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -152,7 +169,10 @@ impl TaskCompletionProjectionV1 {
         if self.schema_version != TASK_COMPLETION_PROJECTION_SCHEMA_VERSION {
             return Err(task_error("unsupported task-completion projection schema"));
         }
-        if self.projector_version != TASK_COMPLETION_PROJECTOR_VERSION {
+        if !matches!(
+            self.projector_version.as_str(),
+            TASK_COMPLETION_PROJECTOR_VERSION | TASK_COMPLETION_PROJECTOR_VERSION_V1
+        ) {
             return Err(task_error("unsupported task-completion projector version"));
         }
         if self.max_tool_observations == 0 || self.max_summary_bytes == 0 {
@@ -182,7 +202,7 @@ impl TaskCompletionProjectionV1 {
             .trace
             .evidence_keys
             .iter()
-            .chain(self.tools.iter().map(|tool| &tool.evidence_key))
+            .chain(self.tools.iter().flat_map(tool_evidence_keys))
         {
             if !self.evidence_catalog.entries.contains_key(key) {
                 return Err(task_error(format!(
@@ -208,6 +228,50 @@ impl TaskCompletionProjectionV1 {
             return Err(task_error(
                 "projection and evidence catalog identities do not match",
             ));
+        }
+        if self.content_policy == TaskCompletionContentPolicyV1::StructuredOnly
+            && (self.trace.input_summary.is_some()
+                || self.trace.output_summary.is_some()
+                || self
+                    .tools
+                    .iter()
+                    .any(|tool| tool.input_summary.is_some() || tool.output_summary.is_some()))
+        {
+            return Err(task_error(
+                "structured-only projection cannot contain free-form summaries",
+            ));
+        }
+        if self.projector_version == TASK_COMPLETION_PROJECTOR_VERSION_V1
+            && (!self.trace.structured_facts.is_empty()
+                || self.tools.iter().any(|tool| {
+                    !tool.structured_facts.is_empty()
+                        || tool.input_summary.is_some()
+                        || tool.output_summary.is_some()
+                        || tool.input_evidence_key.is_some()
+                        || tool.output_evidence_key.is_some()
+                        || tool.input_truncated
+                        || tool.output_truncated
+                }))
+        {
+            return Err(task_error(
+                "v1 task-completion projections cannot contain v2 observations",
+            ));
+        }
+        validate_structured_facts(&self.trace.structured_facts)?;
+        for tool in &self.tools {
+            validate_structured_facts(&tool.structured_facts)?;
+            validate_projected_summary(
+                tool.input_summary.as_deref(),
+                tool.input_evidence_key.as_deref(),
+                self.max_summary_bytes,
+                "tool input",
+            )?;
+            validate_projected_summary(
+                tool.output_summary.as_deref(),
+                tool.output_evidence_key.as_deref(),
+                self.max_summary_bytes,
+                "tool output",
+            )?;
         }
         let recomputed = self.compute_hash()?;
         if recomputed != self.projection_hash {
@@ -249,7 +313,7 @@ impl TaskCompletionProjectionV1 {
             max_tool_observations: self.max_tool_observations,
             max_summary_bytes: self.max_summary_bytes,
         }
-        .release_id()
+        .release_id_for_version(&self.projector_version)
     }
 }
 
@@ -513,6 +577,167 @@ pub struct TaskCompletionExecutionV1 {
     pub provider: Option<ProviderResponseEnvelopeV1>,
 }
 
+fn tool_evidence_keys(tool: &TaskCompletionToolObservationV1) -> impl Iterator<Item = &String> {
+    std::iter::once(&tool.evidence_key)
+        .chain(tool.input_evidence_key.iter())
+        .chain(tool.output_evidence_key.iter())
+}
+
+fn validate_projected_summary(
+    summary: Option<&str>,
+    evidence_key: Option<&str>,
+    maximum_bytes: u32,
+    field: &str,
+) -> Result<(), ContractError> {
+    match (summary, evidence_key) {
+        (Some(summary), Some(evidence_key)) => {
+            require_non_empty(summary, field, task_error)?;
+            require_non_empty(evidence_key, &format!("{field} evidence key"), task_error)?;
+            if summary.len() > maximum_bytes as usize {
+                return Err(task_error(format!(
+                    "{field} exceeds the configured summary bound"
+                )));
+            }
+        }
+        (None, None) => {}
+        _ => {
+            return Err(task_error(format!(
+                "{field} and its evidence key must be present together"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_structured_facts(facts: &BTreeMap<String, Value>) -> Result<(), ContractError> {
+    for (key, value) in facts {
+        if !is_task_completion_fact_key(key) || !is_bounded_fact_value(value) {
+            return Err(task_error(format!(
+                "unsupported or unbounded task-completion fact {key}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn task_completion_structured_facts(
+    attributes: &BTreeMap<String, Value>,
+) -> BTreeMap<String, Value> {
+    attributes
+        .iter()
+        .filter_map(|(key, value)| {
+            let normalized = key.to_ascii_lowercase();
+            (is_task_completion_fact_key(&normalized) && is_bounded_fact_value(value))
+                .then(|| (normalized, value.clone()))
+        })
+        .collect()
+}
+
+fn is_task_completion_fact_key(key: &str) -> bool {
+    matches!(
+        key,
+        "gen_ai.operation.name"
+            | "gen_ai.tool.name"
+            | "gen_ai.tool.status"
+            | "agent.operation"
+            | "agent.operation.effect"
+            | "agent.operation.retry_safety"
+            | "agent.tool.requirement"
+            | "agent.tool.status"
+            | "agent.approval.required"
+            | "agent.approval.outcome"
+            | "agent.state.observation"
+            | "agent.final.status"
+            | "final.status"
+            | "agent.escalation.status"
+            | "final.escalation.status"
+            | "agent.outcome.claim.status"
+            | "final.outcome.claim.status"
+            | "tool.status"
+            | "tool.result.success"
+            | "tool.timeout"
+            | "tool.cancelled"
+            | "tool.operation"
+            | "tool.effect"
+            | "tool.retry_safety"
+            | "tool.requirement"
+            | "tool.approval.required"
+            | "tool.approval.outcome"
+            | "tool.state.observation"
+            | "operation"
+            | "operation.name"
+            | "operation.effect"
+            | "operation.retry_safety"
+            | "operation.requirement"
+            | "execution.status"
+            | "execution.timeout"
+            | "error.type"
+            | "error.code"
+            | "error.retryable"
+            | "tool.error.kind"
+            | "tool.error.code"
+            | "tool.error.retryable"
+            | "exception.type"
+            | "exception.escaped"
+            | "http.status_code"
+            | "rpc.status_code"
+            | "result.success"
+            | "result.ok"
+            | "policy.outcome"
+            | "guardrail.outcome"
+    )
+}
+
+fn is_bounded_fact_value(value: &Value) -> bool {
+    match value {
+        Value::Null | Value::Bool(_) | Value::Number(_) => true,
+        Value::String(value) => value.chars().count() <= 256,
+        Value::Array(_) | Value::Object(_) => false,
+    }
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+fn project_span_summary(
+    content_policy: TaskCompletionContentPolicyV1,
+    value: Option<&str>,
+    evidence_prefix: &str,
+    evidence_kind: EvaluationEvidenceKindV1,
+    span_id: &str,
+    maximum_bytes: u32,
+    pending_records: &mut BTreeMap<
+        String,
+        (EvaluationEvidenceKindV1, EvaluationEvidenceLocationV1),
+    >,
+) -> (Option<String>, Option<String>, bool) {
+    if content_policy != TaskCompletionContentPolicyV1::PreRedactedSummaries {
+        return (None, None, false);
+    }
+    let Some(value) = value else {
+        return (None, None, false);
+    };
+    let truncated = value.len() > maximum_bytes as usize;
+    let summary = bound_utf8(value, maximum_bytes);
+    if summary.is_empty() {
+        return (None, None, truncated);
+    }
+    let key = evidence_key(evidence_prefix, span_id);
+    pending_records.insert(
+        key.clone(),
+        (
+            evidence_kind,
+            EvaluationEvidenceLocationV1::Segment {
+                span_id: span_id.into(),
+                start_byte: 0,
+                end_byte: u32::try_from(summary.len()).unwrap_or(u32::MAX),
+            },
+        ),
+    );
+    (Some(summary), Some(key), truncated)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskCompletionProjectorV1 {
     pub content_policy: TaskCompletionContentPolicyV1,
@@ -532,20 +757,35 @@ impl Default for TaskCompletionProjectorV1 {
 
 impl TaskCompletionProjectorV1 {
     pub fn release_id(&self) -> Result<String, ContractError> {
+        self.release_id_for_version(TASK_COMPLETION_PROJECTOR_VERSION)
+    }
+
+    fn release_id_for_version(&self, projector_version: &str) -> Result<String, ContractError> {
         if self.max_tool_observations == 0 || self.max_summary_bytes == 0 {
             return Err(task_error("projector bounds must be greater than zero"));
         }
-        canonical_content_id(
-            "traceeval.task-completion-projector-release.v1",
-            &serde_json::json!({
-                "projector_version": TASK_COMPLETION_PROJECTOR_VERSION,
+        let identity = match projector_version {
+            TASK_COMPLETION_PROJECTOR_VERSION_V1 => serde_json::json!({
+                "projector_version": TASK_COMPLETION_PROJECTOR_VERSION_V1,
                 "content_policy": self.content_policy,
                 "max_tool_observations": self.max_tool_observations,
                 "max_summary_bytes": self.max_summary_bytes,
                 "truncation_policy": "abstain_on_material_truncation",
                 "ordering": "start_time_unix_nano_then_span_id",
             }),
-        )
+            TASK_COMPLETION_PROJECTOR_VERSION => serde_json::json!({
+                "projector_version": TASK_COMPLETION_PROJECTOR_VERSION,
+                "content_policy": self.content_policy,
+                "max_tool_observations": self.max_tool_observations,
+                "max_summary_bytes": self.max_summary_bytes,
+                "truncation_policy": "abstain_on_material_truncation",
+                "ordering": "start_time_unix_nano_then_span_id",
+                "structured_fact_policy": "task_completion_allowlist_v1",
+                "authorized_tool_content": "bounded_input_output_segments_v1",
+            }),
+            _ => return Err(task_error("unsupported task-completion projector version")),
+        };
+        canonical_content_id("traceeval.task-completion-projector-release.v1", &identity)
     }
 
     pub fn project(
@@ -746,6 +986,9 @@ impl TaskCompletionProjectorV1 {
             .unwrap_or(u32::MAX),
             terminal_span_id: terminal.map(|span| span.id.clone()),
             terminal_status: terminal.map(|span| span.source_status),
+            structured_facts: terminal.map_or_else(BTreeMap::new, |span| {
+                task_completion_structured_facts(&span.attributes)
+            }),
             input_summary: None,
             output_summary: None,
             evidence_keys: Vec::new(),
@@ -815,6 +1058,24 @@ impl TaskCompletionProjectorV1 {
                     },
                 ),
             );
+            let (input_summary, input_evidence_key, input_truncated) = project_span_summary(
+                self.content_policy,
+                span.input.as_deref(),
+                "tool-input",
+                EvaluationEvidenceKindV1::InputSegment,
+                &span.id,
+                self.max_summary_bytes,
+                &mut pending_records,
+            );
+            let (output_summary, output_evidence_key, output_truncated) = project_span_summary(
+                self.content_policy,
+                span.output.as_deref(),
+                "tool-output",
+                EvaluationEvidenceKindV1::OutputSegment,
+                &span.id,
+                self.max_summary_bytes,
+                &mut pending_records,
+            );
             tools.push(TaskCompletionToolObservationV1 {
                 sequence: u32::try_from(index).unwrap_or(u32::MAX),
                 span_id: span.id.clone(),
@@ -822,6 +1083,13 @@ impl TaskCompletionProjectorV1 {
                 tool_name: span.name.clone(),
                 source_status: span.source_status,
                 error_present: span.error.is_some(),
+                structured_facts: task_completion_structured_facts(&span.attributes),
+                input_summary,
+                input_evidence_key,
+                input_truncated,
+                output_summary,
+                output_evidence_key,
+                output_truncated,
                 started_at_unix_nano: span.start_time_unix_nano,
                 evidence_key: key,
             });
@@ -1418,13 +1686,20 @@ mod tests {
 
     fn trace() -> Trace {
         let mut root = Span::new("root", "agent").with_kind(SpanKind::Agent);
+        root.input = Some("update the requested file and verify the result".into());
         root.output = Some("done".into());
         root.source_status = SourceSpanStatus::Ok;
         root.end_time_unix_nano = Some(3);
+        root.attributes
+            .insert("agent.final.status".into(), json!("completed"));
         let mut tool = Span::new("tool-1", "write_file").with_kind(SpanKind::Tool);
         tool.parent_id = Some("root".into());
         tool.source_status = SourceSpanStatus::Ok;
         tool.start_time_unix_nano = Some(2);
+        tool.input = Some("src/web.js".into());
+        tool.output = Some("updated 3 lines".into());
+        tool.attributes
+            .insert("agent.state.observation".into(), json!("verified_changed"));
         Trace::new("trace-1").with_span(root).with_span(tool)
     }
 
@@ -1532,11 +1807,38 @@ mod tests {
         assert_eq!(first.projection_hash, second.projection_hash);
         assert_eq!(first.tools.len(), 1);
         assert_eq!(first.tools[0].parent_span_id.as_deref(), Some("root"));
+        assert_eq!(
+            first.trace.structured_facts.get("agent.final.status"),
+            Some(&json!("completed"))
+        );
+        assert_eq!(first.tools[0].input_summary.as_deref(), Some("src/web.js"));
+        assert_eq!(
+            first.tools[0].output_summary.as_deref(),
+            Some("updated 3 lines")
+        );
+        assert_eq!(
+            first.tools[0]
+                .structured_facts
+                .get("agent.state.observation"),
+            Some(&json!("verified_changed"))
+        );
         assert!(
             first
                 .evidence_catalog
                 .entries
                 .contains_key("tool-span:tool-1")
+        );
+        assert!(
+            first
+                .evidence_catalog
+                .entries
+                .contains_key("tool-input:tool-1")
+        );
+        assert!(
+            first
+                .evidence_catalog
+                .entries
+                .contains_key("tool-output:tool-1")
         );
     }
 
