@@ -44,13 +44,14 @@ pub use provider::{
 #[cfg(feature = "llm-judge-openai")]
 pub use task_completion::OpenAiTaskCompletionEvaluator;
 pub use task_completion::{
-    TASK_COMPLETION_JUDGMENT_SCHEMA_VERSION, TASK_COMPLETION_PROJECTION_SCHEMA_VERSION,
-    TASK_COMPLETION_PROJECTOR_VERSION, TaskCompletionCapabilityV1, TaskCompletionContentPolicyV1,
-    TaskCompletionCriterionJudgmentV1, TaskCompletionCriterionOutcomeV1,
-    TaskCompletionCriterionSpecV1, TaskCompletionDeclaredFieldV1, TaskCompletionEvaluator,
-    TaskCompletionExecutionV1, TaskCompletionJudgmentV1, TaskCompletionOutcomeV1,
-    TaskCompletionProjectionV1, TaskCompletionProjectorV1, TaskCompletionToolObservationV1,
-    TaskCompletionTraceObservationV1, task_completion_judgment_response_schema,
+    TASK_COMPLETION_EVIDENCE_SYSTEM_PROMPT_V2, TASK_COMPLETION_JUDGMENT_SCHEMA_VERSION,
+    TASK_COMPLETION_PROJECTION_SCHEMA_VERSION, TASK_COMPLETION_PROJECTOR_VERSION,
+    TaskCompletionCapabilityV1, TaskCompletionContentPolicyV1, TaskCompletionCriterionJudgmentV1,
+    TaskCompletionCriterionOutcomeV1, TaskCompletionCriterionSpecV1, TaskCompletionDeclaredFieldV1,
+    TaskCompletionEvaluator, TaskCompletionExecutionV1, TaskCompletionJudgmentV1,
+    TaskCompletionOutcomeV1, TaskCompletionProjectionV1, TaskCompletionProjectorV1,
+    TaskCompletionToolObservationV1, TaskCompletionTraceObservationV1,
+    task_completion_judgment_response_schema,
 };
 pub use taxonomy::{
     AGENT_TAXONOMY_RELEASE_SCHEMA_VERSION, AgentTaxonomyReleaseV1, TaxonomyAssignmentSourceV1,

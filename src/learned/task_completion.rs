@@ -23,6 +23,7 @@ pub const TASK_COMPLETION_PROJECTION_SCHEMA_VERSION: &str =
     "traceeval.task_completion_projection.v1";
 pub const TASK_COMPLETION_JUDGMENT_SCHEMA_VERSION: &str = "traceeval.task_completion_judgment.v1";
 pub const TASK_COMPLETION_PROJECTOR_VERSION: &str = "traceeval.task-completion-projector.v2";
+pub const TASK_COMPLETION_EVIDENCE_SYSTEM_PROMPT_V2: &str = "Judge task completion only from the declared success criteria and cited observed trace evidence. An individual tool status establishes only that call's execution; a submit tool, terminal status, agent success claim, deterministic finding, or missing evidence is never proof that the user's task succeeded. Completed requires direct evidence relevant to every must criterion and verification after the last material mutation. Edits or actions without relevant verification are partial, not completed. Explicit failed verification or unrecovered errors make the task failed unless later evidence demonstrates recovery. When truncation or omission hides material outcome evidence, abstain instead of guessing.";
 const TASK_COMPLETION_PROJECTOR_VERSION_V1: &str = "traceeval.task-completion-projector.v1";
 const TASK_COMPLETION_PROJECTION_HASH_DOMAIN: &str = "traceeval.task-completion-projection.v1";
 
@@ -115,6 +116,8 @@ pub struct TaskCompletionTraceObservationV1 {
     pub output_summary: Option<String>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub output_truncated: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_omitted_reason: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub evidence_keys: Vec<String>,
 }
@@ -249,6 +252,7 @@ impl TaskCompletionProjectionV1 {
             && (!self.trace.structured_facts.is_empty()
                 || self.trace.input_truncated
                 || self.trace.output_truncated
+                || self.trace.output_omitted_reason.is_some()
                 || self.tools.iter().any(|tool| {
                     !tool.structured_facts.is_empty()
                         || tool.input_summary.is_some()
@@ -264,6 +268,12 @@ impl TaskCompletionProjectionV1 {
             ));
         }
         validate_structured_facts(&self.trace.structured_facts)?;
+        if let Some(reason) = &self.trace.output_omitted_reason {
+            require_non_empty(reason, "trace output omitted reason", task_error)?;
+            if reason != "duplicated_by_native_child_tools" {
+                return Err(task_error("unsupported trace output omission reason"));
+            }
+        }
         for (summary, field) in [
             (self.trace.input_summary.as_deref(), "trace input"),
             (self.trace.output_summary.as_deref(), "trace output"),
@@ -281,13 +291,13 @@ impl TaskCompletionProjectionV1 {
             validate_projected_summary(
                 tool.input_summary.as_deref(),
                 tool.input_evidence_key.as_deref(),
-                self.max_summary_bytes,
+                tool_summary_bytes(self.max_summary_bytes),
                 "tool input",
             )?;
             validate_projected_summary(
                 tool.output_summary.as_deref(),
                 tool.output_evidence_key.as_deref(),
-                self.max_summary_bytes,
+                tool_summary_bytes(self.max_summary_bytes),
                 "tool output",
             )?;
         }
@@ -722,6 +732,37 @@ fn is_false(value: &bool) -> bool {
     !*value
 }
 
+fn tool_summary_bytes(maximum_summary_bytes: u32) -> u32 {
+    maximum_summary_bytes.min(1_024)
+}
+
+fn has_native_tool_children_with_duplicated_terminal_output(
+    spans: &[&Span],
+    terminal_output: &str,
+) -> bool {
+    if !spans.iter().any(|span| is_tool_span(span)) {
+        return false;
+    }
+    let Ok(Value::Array(items)) = serde_json::from_str::<Value>(terminal_output) else {
+        return false;
+    };
+    if items.is_empty() {
+        return false;
+    }
+    let trajectory_items = items
+        .iter()
+        .filter(|item| {
+            item.as_object().is_some_and(|object| {
+                object.contains_key("tool")
+                    && (object.contains_key("arguments")
+                        || object.contains_key("result")
+                        || object.contains_key("status"))
+            })
+        })
+        .count();
+    trajectory_items.saturating_mul(2) >= items.len()
+}
+
 fn project_span_summary(
     content_policy: TaskCompletionContentPolicyV1,
     value: Option<&str>,
@@ -805,6 +846,8 @@ impl TaskCompletionProjectorV1 {
                 "structured_fact_policy": "task_completion_allowlist_v1",
                 "authorized_tool_content": "bounded_input_output_segments_v1",
                 "content_truncation_policy": "field_level_flags_and_material_abstention_v1",
+                "tool_summary_bytes": "min(max_summary_bytes,1024)",
+                "terminal_tool_trajectory_policy": "omit_when_native_children_are_present_v1",
             }),
             _ => return Err(task_error("unsupported task-completion projector version")),
         };
@@ -1016,6 +1059,7 @@ impl TaskCompletionProjectorV1 {
             input_truncated: false,
             output_summary: None,
             output_truncated: false,
+            output_omitted_reason: None,
             evidence_keys: Vec::new(),
         };
         let mut pending_records = BTreeMap::new();
@@ -1039,7 +1083,9 @@ impl TaskCompletionProjectorV1 {
                     trace_observation.input_summary =
                         Some(bound_utf8(input, self.max_summary_bytes));
                 }
-                if let Some(output) = terminal.output.as_deref() {
+                if let Some(output) = terminal.output.as_deref()
+                    && !has_native_tool_children_with_duplicated_terminal_output(&spans, output)
+                {
                     trace_observation.output_truncated =
                         output.len() > self.max_summary_bytes as usize;
                     let summary = bound_utf8(output, self.max_summary_bytes);
@@ -1059,6 +1105,11 @@ impl TaskCompletionProjectorV1 {
                         trace_observation.evidence_keys.push(key);
                         trace_observation.output_summary = Some(summary);
                     }
+                } else if terminal.output.as_deref().is_some_and(|output| {
+                    has_native_tool_children_with_duplicated_terminal_output(&spans, output)
+                }) {
+                    trace_observation.output_omitted_reason =
+                        Some("duplicated_by_native_child_tools".into());
                 }
             }
         }
@@ -1091,7 +1142,7 @@ impl TaskCompletionProjectorV1 {
                 "tool-input",
                 EvaluationEvidenceKindV1::InputSegment,
                 &span.id,
-                self.max_summary_bytes,
+                tool_summary_bytes(self.max_summary_bytes),
                 &mut pending_records,
             );
             let (output_summary, output_evidence_key, output_truncated) = project_span_summary(
@@ -1100,7 +1151,7 @@ impl TaskCompletionProjectorV1 {
                 "tool-output",
                 EvaluationEvidenceKindV1::OutputSegment,
                 &span.id,
-                self.max_summary_bytes,
+                tool_summary_bytes(self.max_summary_bytes),
                 &mut pending_records,
             );
             tools.push(TaskCompletionToolObservationV1 {
@@ -1915,6 +1966,79 @@ mod tests {
         );
         assert!(!projection.truncated);
         assert_eq!(local_abstention_reason(&projection, &binding), None);
+    }
+
+    #[test]
+    fn duplicated_terminal_tool_trajectory_is_omitted_when_native_children_exist() {
+        let context = context();
+        let binding = binding(&context);
+        let context_projection = context_projection(&context);
+        let projector = TaskCompletionProjectorV1 {
+            content_policy: TaskCompletionContentPolicyV1::PreRedactedSummaries,
+            ..Default::default()
+        };
+        let mut duplicated_trace = trace();
+        duplicated_trace
+            .spans
+            .iter_mut()
+            .find(|span| span.id == "root")
+            .unwrap()
+            .output = Some(
+            json!([{"tool": "write_file", "arguments": "src/web.js", "status": "OK"}]).to_string(),
+        );
+        let projection = projector
+            .project(
+                "trace-1",
+                "rev-1",
+                &binding,
+                Some(&context),
+                Some(&context_projection),
+                &duplicated_trace,
+            )
+            .unwrap();
+
+        assert!(projection.trace.output_summary.is_none());
+        assert_eq!(
+            projection.trace.output_omitted_reason.as_deref(),
+            Some("duplicated_by_native_child_tools")
+        );
+        assert!(!projection.truncated);
+    }
+
+    #[test]
+    fn tool_content_has_a_smaller_visible_bound_than_terminal_content() {
+        let context = context();
+        let binding = binding(&context);
+        let context_projection = context_projection(&context);
+        let projector = TaskCompletionProjectorV1 {
+            content_policy: TaskCompletionContentPolicyV1::PreRedactedSummaries,
+            max_summary_bytes: 4_096,
+            ..Default::default()
+        };
+        let mut long_trace = trace();
+        long_trace
+            .spans
+            .iter_mut()
+            .find(|span| span.id == "tool-1")
+            .unwrap()
+            .output = Some("x".repeat(2_048));
+        let projection = projector
+            .project(
+                "trace-1",
+                "rev-1",
+                &binding,
+                Some(&context),
+                Some(&context_projection),
+                &long_trace,
+            )
+            .unwrap();
+
+        assert_eq!(
+            projection.tools[0].output_summary.as_ref().unwrap().len(),
+            1_024
+        );
+        assert!(projection.tools[0].output_truncated);
+        assert!(!projection.truncated);
     }
 
     #[test]
