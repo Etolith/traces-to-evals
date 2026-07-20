@@ -12,8 +12,8 @@ pub use agreement::{AgreementLabelScaleV1, AgreementRatingV1, HumanAgreementRepo
 pub use calibration::{
     BINARY_CALIBRATION_MODEL_SCHEMA_VERSION, BinaryCalibrationExampleV1,
     BinaryCalibrationFitOptionsV1, BinaryCalibrationModelV1, BinaryCalibrationReportV1,
-    BinaryPredictionV1, CalibrationBinV1, CalibrationDataSplitV1, ConfusionMatrixV1,
-    LearnedCalibrationFeaturesV1, SelectiveRiskPointV1,
+    BinaryPredictionV1, BinomialRateIntervalV1, CalibrationBinV1, CalibrationDataSplitV1,
+    ConfusionMatrixV1, LearnedCalibrationFeaturesV1, SelectiveRiskPointV1,
 };
 pub use canonical::{
     AGENT_CONTEXT_RELEASE_HASH_DOMAIN, AGENT_TAXONOMY_RELEASE_HASH_DOMAIN,

@@ -361,6 +361,19 @@ pub struct SelectiveRiskPointV1 {
     pub minimum_confidence: Option<f64>,
 }
 
+/// A deterministic 95% Wilson score interval for a binomial rate. The exact
+/// numerator and denominator travel with the interval so a UI or canonical
+/// scorer can reconcile every displayed bound.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BinomialRateIntervalV1 {
+    pub successes: u64,
+    pub trials: u64,
+    pub estimate: f64,
+    pub lower_95: f64,
+    pub upper_95: f64,
+    pub method: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BinaryCalibrationReportV1 {
     pub evaluator_release_id: String,
@@ -375,9 +388,15 @@ pub struct BinaryCalibrationReportV1 {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub precision: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub precision_interval: Option<BinomialRateIntervalV1>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recall: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recall_interval: Option<BinomialRateIntervalV1>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub specificity: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub specificity_interval: Option<BinomialRateIntervalV1>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub f1: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -479,6 +498,18 @@ impl BinaryCalibrationReportV1 {
             confusion.true_negative,
             confusion.true_negative + confusion.false_positive,
         );
+        let precision_interval = wilson_95(
+            confusion.true_positive,
+            confusion.true_positive + confusion.false_positive,
+        );
+        let recall_interval = wilson_95(
+            confusion.true_positive,
+            confusion.true_positive + confusion.false_negative,
+        );
+        let specificity_interval = wilson_95(
+            confusion.true_negative,
+            confusion.true_negative + confusion.false_positive,
+        );
         let f1 = harmonic_mean(precision, recall);
         let negative_precision = ratio(
             confusion.true_negative,
@@ -522,8 +553,11 @@ impl BinaryCalibrationReportV1 {
             abstained_count: attempted_count - decided_count,
             confusion,
             precision,
+            precision_interval,
             recall,
+            recall_interval,
             specificity,
+            specificity_interval,
             f1,
             macro_f1,
             matthews_correlation,
@@ -535,6 +569,39 @@ impl BinaryCalibrationReportV1 {
             selective_risk: selective_risk(&decided, attempted_count, decision_threshold),
         })
     }
+}
+
+fn wilson_95(successes: u64, trials: u64) -> Option<BinomialRateIntervalV1> {
+    if trials == 0 || successes > trials {
+        return None;
+    }
+    // 1.959963984540054 is the 97.5th percentile of the standard normal.
+    let z = 1.959_963_984_540_054_f64;
+    let n = trials as f64;
+    let estimate = successes as f64 / n;
+    let z_squared = z * z;
+    let denominator = 1.0 + z_squared / n;
+    let center = (estimate + z_squared / (2.0 * n)) / denominator;
+    let half_width =
+        z * ((estimate * (1.0 - estimate) / n + z_squared / (4.0 * n * n)).sqrt()) / denominator;
+    let lower_95 = if successes == 0 {
+        0.0
+    } else {
+        (center - half_width).max(0.0)
+    };
+    let upper_95 = if successes == trials {
+        1.0
+    } else {
+        (center + half_width).min(1.0)
+    };
+    Some(BinomialRateIntervalV1 {
+        successes,
+        trials,
+        estimate,
+        lower_95,
+        upper_95,
+        method: "wilson_score_95".into(),
+    })
 }
 
 fn feature_standardization(
@@ -985,11 +1052,31 @@ mod tests {
         assert_eq!(report.confusion.false_negative, 1);
         assert_eq!(report.precision, Some(0.5));
         assert_eq!(report.recall, Some(0.5));
+        let precision_interval = report.precision_interval.as_ref().unwrap();
+        assert_eq!(
+            (precision_interval.successes, precision_interval.trials),
+            (1, 2)
+        );
+        assert!((precision_interval.lower_95 - 0.094_531_205_734_230_74).abs() < 1e-12);
+        assert!((precision_interval.upper_95 - 0.905_468_794_265_769_3).abs() < 1e-12);
+        assert_eq!(precision_interval.method, "wilson_score_95");
         assert_eq!(report.f1, Some(0.5));
         assert_eq!(report.macro_f1, Some(0.5));
         assert_eq!(report.matthews_correlation, Some(0.0));
         assert!(report.brier_score.unwrap() > 0.3);
         assert_eq!(report.selective_risk.last().unwrap().coverage, 0.8);
+    }
+
+    #[test]
+    fn wilson_interval_handles_boundaries_and_missing_denominators() {
+        assert_eq!(wilson_95(0, 0), None);
+        assert_eq!(wilson_95(2, 1), None);
+        let none_succeeded = wilson_95(0, 10).unwrap();
+        assert_eq!(none_succeeded.lower_95, 0.0);
+        assert!(none_succeeded.upper_95 > 0.27 && none_succeeded.upper_95 < 0.28);
+        let all_succeeded = wilson_95(10, 10).unwrap();
+        assert!(all_succeeded.lower_95 > 0.72 && all_succeeded.lower_95 < 0.73);
+        assert_eq!(all_succeeded.upper_95, 1.0);
     }
 
     #[test]
