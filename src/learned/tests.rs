@@ -503,6 +503,18 @@ impl ChatClient for LegacyFakeChatClient {
     }
 }
 
+struct FailingLegacyChatClient;
+
+#[async_trait::async_trait]
+impl ChatClient for FailingLegacyChatClient {
+    async fn complete_json<T>(&self, _request: ChatRequest) -> Result<T>
+    where
+        T: serde::de::DeserializeOwned + Send,
+    {
+        anyhow::bail!("transport unavailable")
+    }
+}
+
 #[test]
 fn legacy_chat_client_gets_default_envelope_without_new_implementation() {
     let request = ChatRequest {
@@ -538,6 +550,51 @@ fn legacy_chat_client_gets_default_envelope_without_new_implementation() {
             .response_hash
             .starts_with("sha256:")
     );
+}
+
+#[test]
+fn legacy_chat_client_failure_preserves_context_id() {
+    let request = ChatRequest {
+        model: "gpt-test".to_string(),
+        system_prompt: "system".to_string(),
+        user_prompt: "user".to_string(),
+        response_schema: ResponseSchema {
+            name: "fake".to_string(),
+            description: None,
+            schema: json!({"type": "object"}),
+            strict: true,
+        },
+        context_id: Some("case-1".to_string()),
+    };
+    let error = futures::executor::block_on(
+        FailingLegacyChatClient.complete_json_enveloped::<FakeOutput>(request),
+    )
+    .unwrap_err();
+    let failure = error.downcast_ref::<ProviderExecutionFailureV1>().unwrap();
+    assert_eq!(failure.message, "transport unavailable for case-1");
+}
+
+#[test]
+fn provider_response_rejects_blank_optional_metadata() {
+    let mut response = ProviderResponseEnvelopeV1 {
+        provider: Some(" ".to_string()),
+        requested_model: "gpt-test".to_string(),
+        returned_model: None,
+        response_id: None,
+        finish_reason: None,
+        system_fingerprint: None,
+        service_tier: None,
+        usage: None,
+        request_hash: format!("sha256:{}", "a".repeat(64)),
+        response_hash: format!("sha256:{}", "b".repeat(64)),
+        attempts: 1,
+        latency_ms: 12,
+    };
+    assert!(response.validate().is_err());
+
+    response.provider = Some("openai".to_string());
+    response.finish_reason = Some(String::new());
+    assert!(response.validate().is_err());
 }
 
 #[test]

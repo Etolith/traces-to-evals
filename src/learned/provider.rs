@@ -144,12 +144,24 @@ pub struct ProviderResponseEnvelopeV1 {
 
 impl ProviderResponseEnvelopeV1 {
     pub fn validate(&self) -> Result<(), ContractError> {
+        if let Some(provider) = &self.provider {
+            require_non_empty(provider, "provider", provider_error)?;
+        }
         require_non_empty(&self.requested_model, "requested_model", provider_error)?;
         if let Some(returned_model) = &self.returned_model {
             require_non_empty(returned_model, "returned_model", provider_error)?;
         }
         if let Some(response_id) = &self.response_id {
             require_non_empty(response_id, "response_id", provider_error)?;
+        }
+        if let Some(finish_reason) = &self.finish_reason {
+            require_non_empty(finish_reason, "finish_reason", provider_error)?;
+        }
+        if let Some(system_fingerprint) = &self.system_fingerprint {
+            require_non_empty(system_fingerprint, "system_fingerprint", provider_error)?;
+        }
+        if let Some(service_tier) = &self.service_tier {
+            require_non_empty(service_tier, "service_tier", provider_error)?;
         }
         require_sha256(&self.request_hash, "request_hash", provider_error)?;
         require_sha256(&self.response_hash, "response_hash", provider_error)?;

@@ -59,6 +59,7 @@ pub trait ChatClient: Send + Sync {
         T: DeserializeOwned + Serialize + Send,
     {
         let requested_model = request.model.clone();
+        let context_id = request.context_id.clone();
         let request_hash = canonical_content_id("traceeval.chat-request.v1", &request)?;
         let started = Instant::now();
         let output = match self.complete_json(request).await {
@@ -67,7 +68,10 @@ pub trait ChatClient: Send + Sync {
                 let latency_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
                 return Err(ProviderExecutionFailureV1 {
                     stage: ProviderExecutionStageV1::Transport,
-                    message: error.to_string(),
+                    message: match context_id {
+                        Some(context_id) => format!("{error} for {context_id}"),
+                        None => error.to_string(),
+                    },
                     requested_model,
                     request_hash,
                     attempts: 1,
