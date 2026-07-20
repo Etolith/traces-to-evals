@@ -1,3 +1,4 @@
+mod agreement;
 mod calibration;
 mod canonical;
 mod context;
@@ -7,6 +8,7 @@ mod provider;
 mod task_completion;
 mod taxonomy;
 
+pub use agreement::{AgreementLabelScaleV1, AgreementRatingV1, HumanAgreementReportV1};
 pub use calibration::{
     BINARY_CALIBRATION_MODEL_SCHEMA_VERSION, BinaryCalibrationExampleV1,
     BinaryCalibrationFitOptionsV1, BinaryCalibrationModelV1, BinaryCalibrationReportV1,
