@@ -50,7 +50,7 @@ pub use task_completion::{
     TaskCompletionCriterionSpecV1, TaskCompletionDeclaredFieldV1, TaskCompletionEvaluator,
     TaskCompletionExecutionV1, TaskCompletionJudgmentV1, TaskCompletionOutcomeV1,
     TaskCompletionProjectionV1, TaskCompletionProjectorV1, TaskCompletionToolObservationV1,
-    TaskCompletionTraceObservationV1,
+    TaskCompletionTraceObservationV1, task_completion_judgment_response_schema,
 };
 pub use taxonomy::{
     AGENT_TAXONOMY_RELEASE_SCHEMA_VERSION, AgentTaxonomyReleaseV1, TaxonomyAssignmentSourceV1,

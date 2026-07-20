@@ -881,6 +881,8 @@ impl TaskCompletionProjectorV1 {
 pub struct TaskCompletionEvaluator<C> {
     client: C,
     model: String,
+    system_prompt: String,
+    response_schema: ResponseSchema,
     evaluator_release: EvaluatorReleaseSpecV1,
 }
 
@@ -925,18 +927,49 @@ where
         }
         let model = model.into();
         require_non_empty(&model, "model", task_error)?;
-        if let EvaluationImplementationV1::PromptJudge {
-            requested_model, ..
-        } = &evaluator_release.implementation
-            && requested_model != &model
-        {
+        let (system_prompt, rubric, release_response_schema, decoding_parameters) =
+            match &evaluator_release.implementation {
+                EvaluationImplementationV1::PromptJudge {
+                    requested_model,
+                    system_prompt,
+                    rubric,
+                    response_schema,
+                    decoding_parameters,
+                    ..
+                } => {
+                    if requested_model != &model {
+                        return Err(task_error(
+                            "runtime model must match the immutable evaluator release",
+                        ));
+                    }
+                    (system_prompt, rubric, response_schema, decoding_parameters)
+                }
+                _ => {
+                    return Err(task_error(
+                        "task-completion provider execution requires a prompt judge",
+                    ));
+                }
+            };
+        if !decoding_parameters.is_empty() {
             return Err(task_error(
-                "runtime model must match the immutable evaluator release",
+                "task-completion decoding parameters are unsupported by this runtime",
+            ));
+        }
+        let response_schema = task_completion_response_schema();
+        if release_response_schema != &response_schema.schema {
+            return Err(task_error(
+                "evaluator release response schema does not match the task-completion judgment schema",
             ));
         }
         Ok(Self {
             client,
             model,
+            system_prompt: format!(
+                "{}\n\nTask-completion rubric:\n{}",
+                system_prompt.trim(),
+                rubric.trim()
+            ),
+            response_schema,
             evaluator_release,
         })
     }
@@ -957,9 +990,9 @@ where
 
         let request = ChatRequest {
             model: self.model.clone(),
-            system_prompt: task_completion_system_prompt().into(),
+            system_prompt: self.system_prompt.clone(),
             user_prompt: serde_json::to_string(projection)?,
-            response_schema: task_completion_response_schema(),
+            response_schema: self.response_schema.clone(),
             context_id: Some(projection.projection_hash.clone()),
         };
         let envelope = self
@@ -1075,10 +1108,6 @@ fn local_abstention(
     .into_learned_evaluation(projection, binding, evaluator_release)
 }
 
-fn task_completion_system_prompt() -> &'static str {
-    "Judge whether the agent completed the declared task. Use only observed evidence keys from the supplied catalog. Declared context describes the goal but is never proof that the goal was achieved. Return completed only when every must criterion is supported; partial for supported progress with a remaining gap; failed for an evidenced unsatisfied must criterion; otherwise abstain."
-}
-
 fn task_completion_response_schema() -> ResponseSchema {
     ResponseSchema {
         name: "task_completion_judgment_v1".into(),
@@ -1116,6 +1145,10 @@ fn task_completion_response_schema() -> ResponseSchema {
             }
         }),
     }
+}
+
+pub fn task_completion_judgment_response_schema() -> Value {
+    task_completion_response_schema().schema
 }
 
 fn project_field(
@@ -1231,7 +1264,7 @@ fn task_error(message: impl Into<String>) -> ContractError {
 #[cfg(test)]
 mod tests {
     use std::sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
     };
 
@@ -1354,7 +1387,7 @@ mod tests {
                 requested_model: "test-model".into(),
                 system_prompt: "judge".into(),
                 rubric: "task completion".into(),
-                response_schema: json!({}),
+                response_schema: task_completion_judgment_response_schema(),
                 decoding_parameters: BTreeMap::new(),
                 parser_version: "v1".into(),
                 normalizer_version: "v1".into(),
@@ -1390,6 +1423,23 @@ mod tests {
             T: DeserializeOwned + Send,
         {
             self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(serde_json::from_value(self.output.clone())?)
+        }
+    }
+
+    #[derive(Clone)]
+    struct RecordingChatClient {
+        request: Arc<Mutex<Option<ChatRequest>>>,
+        output: Value,
+    }
+
+    #[async_trait::async_trait]
+    impl ChatClient for RecordingChatClient {
+        async fn complete_json<T>(&self, request: ChatRequest) -> anyhow::Result<T>
+        where
+            T: DeserializeOwned + Send,
+        {
+            *self.request.lock().unwrap() = Some(request);
             Ok(serde_json::from_value(self.output.clone())?)
         }
     }
@@ -1559,6 +1609,114 @@ mod tests {
             execution.evaluation.abstention_reason,
             Some(LearnedAbstentionReasonV1::InvalidProviderOutput)
         );
+    }
+
+    #[test]
+    fn provider_request_uses_the_exact_release_prompt_rubric_and_schema() {
+        let context = context();
+        let binding = binding(&context);
+        let context_projection = context_projection(&context);
+        let projection = TaskCompletionProjectorV1 {
+            content_policy: TaskCompletionContentPolicyV1::PreRedactedSummaries,
+            ..Default::default()
+        }
+        .project(
+            "trace-1",
+            "rev-1",
+            &binding,
+            Some(&context),
+            Some(&context_projection),
+            &trace(),
+        )
+        .unwrap();
+        let mut evaluator_release = release(&projection);
+        if let EvaluationImplementationV1::PromptJudge {
+            system_prompt,
+            rubric,
+            ..
+        } = &mut evaluator_release.implementation
+        {
+            *system_prompt = "SYSTEM-PROMPT-IDENTITY".into();
+            *rubric = "RUBRIC-IDENTITY".into();
+        }
+        let request = Arc::new(Mutex::new(None));
+        let evaluator = TaskCompletionEvaluator::new(
+            RecordingChatClient {
+                request: request.clone(),
+                output: serde_json::to_value(TaskCompletionJudgmentV1 {
+                    schema_version: TASK_COMPLETION_JUDGMENT_SCHEMA_VERSION.into(),
+                    outcome: TaskCompletionOutcomeV1::Completed,
+                    completion_score: Some(1.0),
+                    model_reported_confidence: Some(0.9),
+                    explanation: "completed from observed terminal evidence".into(),
+                    evidence_keys: vec!["terminal-span:root".into()],
+                    criteria: vec![TaskCompletionCriterionJudgmentV1 {
+                        criterion_id: "criterion-1".into(),
+                        outcome: TaskCompletionCriterionOutcomeV1::Satisfied,
+                        score: Some(1.0),
+                        evidence_keys: vec!["terminal-span:root".into()],
+                    }],
+                    abstention_reason: None,
+                })
+                .unwrap(),
+            },
+            "test-model",
+            evaluator_release,
+        )
+        .unwrap();
+        let execution =
+            futures::executor::block_on(evaluator.evaluate(&projection, &binding)).unwrap();
+        assert_eq!(execution.evaluation.verdict, LearnedVerdictV1::Pass);
+        let request = request.lock().unwrap().clone().unwrap();
+        assert_eq!(
+            request.system_prompt,
+            "SYSTEM-PROMPT-IDENTITY\n\nTask-completion rubric:\nRUBRIC-IDENTITY"
+        );
+        assert_eq!(
+            request.response_schema.schema,
+            task_completion_judgment_response_schema()
+        );
+    }
+
+    #[test]
+    fn unsupported_release_decoding_policy_fails_before_provider_execution() {
+        let context = context();
+        let binding = binding(&context);
+        let context_projection = context_projection(&context);
+        let projection = TaskCompletionProjectorV1 {
+            content_policy: TaskCompletionContentPolicyV1::PreRedactedSummaries,
+            ..Default::default()
+        }
+        .project(
+            "trace-1",
+            "rev-1",
+            &binding,
+            Some(&context),
+            Some(&context_projection),
+            &trace(),
+        )
+        .unwrap();
+        let mut evaluator_release = release(&projection);
+        if let EvaluationImplementationV1::PromptJudge {
+            decoding_parameters,
+            ..
+        } = &mut evaluator_release.implementation
+        {
+            decoding_parameters.insert("temperature".into(), json!(0));
+        }
+        let calls = Arc::new(AtomicUsize::new(0));
+        assert!(
+            TaskCompletionEvaluator::new(
+                FakeChatClient {
+                    calls: calls.clone(),
+                    output: json!({}),
+                },
+                "test-model",
+                evaluator_release,
+            )
+            .is_err()
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 
     #[test]

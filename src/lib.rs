@@ -136,7 +136,7 @@ pub use learned::{
     TaxonomyAssignmentV1, TaxonomyDimensionV1, TaxonomyLineageOperationV1, TaxonomyNodeStateV1,
     TaxonomyNodeV1, TaxonomyOpenSetStateV1, TaxonomyRelationKindV1, TaxonomyRelationV1,
     TraceContextBindingProvenanceV1, TraceContextBindingResolutionV1, TraceContextBindingV1,
-    canonical_content_id, canonical_json_bytes,
+    canonical_content_id, canonical_json_bytes, task_completion_judgment_response_schema,
 };
 pub use model::{
     EvalCase, FactQuality, PayloadIdentity, SourceSpanStatus, Span, SpanEvent, SpanKind, SpanLink,
@@ -267,7 +267,7 @@ pub mod prelude {
         TaxonomyDimensionV1, TaxonomyLineageOperationV1, TaxonomyNodeStateV1, TaxonomyNodeV1,
         TaxonomyOpenSetStateV1, TaxonomyRelationKindV1, TaxonomyRelationV1,
         TraceContextBindingProvenanceV1, TraceContextBindingResolutionV1, TraceContextBindingV1,
-        canonical_content_id, canonical_json_bytes,
+        canonical_content_id, canonical_json_bytes, task_completion_judgment_response_schema,
     };
     pub use crate::model::{
         EvalCase, FactQuality, PayloadIdentity, SourceSpanStatus, Span, SpanEvent, SpanKind,
