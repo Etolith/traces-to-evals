@@ -109,8 +109,12 @@ pub struct TaskCompletionTraceObservationV1 {
     pub structured_facts: BTreeMap<String, Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_summary: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub input_truncated: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_summary: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub output_truncated: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub evidence_keys: Vec<String>,
 }
@@ -243,6 +247,8 @@ impl TaskCompletionProjectionV1 {
         }
         if self.projector_version == TASK_COMPLETION_PROJECTOR_VERSION_V1
             && (!self.trace.structured_facts.is_empty()
+                || self.trace.input_truncated
+                || self.trace.output_truncated
                 || self.tools.iter().any(|tool| {
                     !tool.structured_facts.is_empty()
                         || tool.input_summary.is_some()
@@ -258,6 +264,18 @@ impl TaskCompletionProjectionV1 {
             ));
         }
         validate_structured_facts(&self.trace.structured_facts)?;
+        for (summary, field) in [
+            (self.trace.input_summary.as_deref(), "trace input"),
+            (self.trace.output_summary.as_deref(), "trace output"),
+        ] {
+            if let Some(summary) = summary
+                && summary.len() > self.max_summary_bytes as usize
+            {
+                return Err(task_error(format!(
+                    "{field} exceeds the configured summary bound"
+                )));
+            }
+        }
         for tool in &self.tools {
             validate_structured_facts(&tool.structured_facts)?;
             validate_projected_summary(
@@ -782,6 +800,7 @@ impl TaskCompletionProjectorV1 {
                 "ordering": "start_time_unix_nano_then_span_id",
                 "structured_fact_policy": "task_completion_allowlist_v1",
                 "authorized_tool_content": "bounded_input_output_segments_v1",
+                "content_truncation_policy": "field_level_flags_and_material_abstention_v1",
             }),
             _ => return Err(task_error("unsupported task-completion projector version")),
         };
@@ -990,7 +1009,9 @@ impl TaskCompletionProjectorV1 {
                 task_completion_structured_facts(&span.attributes)
             }),
             input_summary: None,
+            input_truncated: false,
             output_summary: None,
+            output_truncated: false,
             evidence_keys: Vec::new(),
         };
         let mut pending_records = BTreeMap::new();
@@ -1009,12 +1030,14 @@ impl TaskCompletionProjectorV1 {
             );
             if self.content_policy == TaskCompletionContentPolicyV1::PreRedactedSummaries {
                 if let Some(input) = terminal.input.as_deref() {
-                    truncated |= input.len() > self.max_summary_bytes as usize;
+                    trace_observation.input_truncated =
+                        input.len() > self.max_summary_bytes as usize;
                     trace_observation.input_summary =
                         Some(bound_utf8(input, self.max_summary_bytes));
                 }
                 if let Some(output) = terminal.output.as_deref() {
-                    truncated |= output.len() > self.max_summary_bytes as usize;
+                    trace_observation.output_truncated =
+                        output.len() > self.max_summary_bytes as usize;
                     let summary = bound_utf8(output, self.max_summary_bytes);
                     if !summary.is_empty() {
                         let key = evidence_key("terminal-output", &terminal.id);
@@ -1840,6 +1863,43 @@ mod tests {
                 .entries
                 .contains_key("tool-output:tool-1")
         );
+    }
+
+    #[test]
+    fn bounded_content_truncation_is_visible_without_discarding_structural_evidence() {
+        let context = context();
+        let binding = binding(&context);
+        let context_projection = context_projection(&context);
+        let projector = TaskCompletionProjectorV1 {
+            content_policy: TaskCompletionContentPolicyV1::PreRedactedSummaries,
+            max_summary_bytes: 32,
+            ..Default::default()
+        };
+        let mut long_trace = trace();
+        long_trace
+            .spans
+            .iter_mut()
+            .find(|span| span.id == "root")
+            .unwrap()
+            .output = Some("x".repeat(128));
+        let projection = projector
+            .project(
+                "trace-1",
+                "rev-1",
+                &binding,
+                Some(&context),
+                Some(&context_projection),
+                &long_trace,
+            )
+            .unwrap();
+
+        assert!(projection.trace.output_truncated);
+        assert_eq!(
+            projection.trace.output_summary.as_deref(),
+            Some("x".repeat(32).as_str())
+        );
+        assert!(!projection.truncated);
+        assert_eq!(local_abstention_reason(&projection, &binding), None);
     }
 
     #[test]
