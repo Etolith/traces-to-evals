@@ -87,6 +87,11 @@ pub struct EvaluatorReleaseSpecV1 {
     pub implementation: EvaluationImplementationV1,
     pub projection_release_id: String,
     pub context_projection_release_id: String,
+    /// Exact immutable taxonomy release used to interpret applicability IDs.
+    /// Stable node IDs alone are insufficient because their active state,
+    /// definition, and lineage can change between taxonomy releases.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applicable_taxonomy_release_id: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub applicable_taxonomy_node_ids: BTreeSet<String>,
     pub input_bounds: EvaluationInputBoundsV1,
@@ -116,6 +121,27 @@ impl EvaluatorReleaseSpecV1 {
             "context_projection_release_id",
             evaluator_error,
         )?;
+        match (
+            self.applicable_taxonomy_release_id.as_deref(),
+            self.applicable_taxonomy_node_ids.is_empty(),
+        ) {
+            (Some(release_id), false) => require_sha256(
+                release_id,
+                "applicable_taxonomy_release_id",
+                evaluator_error,
+            )?,
+            (None, false) => {
+                return Err(evaluator_error(
+                    "taxonomy applicability node IDs require an exact taxonomy release ID",
+                ));
+            }
+            (Some(_), true) => {
+                return Err(evaluator_error(
+                    "taxonomy release applicability requires at least one taxonomy node ID",
+                ));
+            }
+            (None, true) => {}
+        }
         require_non_empty(
             &self.evidence_schema_version,
             "evidence_schema_version",

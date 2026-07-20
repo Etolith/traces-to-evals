@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::{
-    AGENT_CONTEXT_RELEASE_HASH_DOMAIN, ContractError, TRACE_CONTEXT_BINDING_HASH_DOMAIN,
-    canonical_content_id, require_non_empty, require_sha256,
+    AGENT_CONTEXT_RELEASE_HASH_DOMAIN, CONTEXT_PROJECTION_HASH_DOMAIN, ContractError,
+    TRACE_CONTEXT_BINDING_HASH_DOMAIN, canonical_content_id, require_non_empty, require_sha256,
 };
 
 pub const AGENT_CONTEXT_RELEASE_SCHEMA_VERSION: &str = "traceeval.agent_context_release.v1";
@@ -432,6 +432,19 @@ impl ContextProjectionV1 {
             }
         }
         Ok(())
+    }
+
+    /// Returns the immutable identity of the selected fields, projection
+    /// class, projector, and redaction policy.
+    pub fn release_id(&self) -> Result<String, ContractError> {
+        require_sha256(
+            &self.context_release_id,
+            "context_release_id",
+            context_error,
+        )?;
+        require_non_empty(&self.projector_version, "projector_version", context_error)?;
+        require_non_empty(&self.redaction_version, "redaction_version", context_error)?;
+        canonical_content_id(CONTEXT_PROJECTION_HASH_DOMAIN, self)
     }
 }
 

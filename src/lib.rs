@@ -106,31 +106,50 @@ pub use evaluation::{
     AsyncEvaluator, EvaluationCriteria, EvaluationResult, EvaluationRun, Evaluator, RunScore,
     ScoreScale, WeightedAggregate,
 };
+#[cfg(feature = "llm-judge-openai")]
+pub use learned::OpenAiTaskCompletionEvaluator;
 pub use learned::{
     AGENT_CONTEXT_RELEASE_SCHEMA_VERSION, AGENT_TAXONOMY_RELEASE_SCHEMA_VERSION,
     AgentArchitectureContextV1, AgentCapabilityV1, AgentContextReleaseV1, AgentEvaluationContextV1,
     AgentIdentityContextV1, AgentIntentContextV1, AgentPolicyContextV1, AgentTaxonomyReleaseV1,
-    CapabilityEffectV1, CapabilityKindV1, ChatCompletionEnvelopeV1, ContextFieldMetadataV1,
+    AgreementLabelScaleV1, AgreementRatingV1, BINARY_CALIBRATION_MODEL_SCHEMA_VERSION,
+    BinaryCalibrationExampleV1, BinaryCalibrationFitOptionsV1, BinaryCalibrationModelV1,
+    BinaryCalibrationReportV1, BinaryPredictionV1, BinomialRateIntervalV1,
+    CONTEXT_PROJECTION_HASH_DOMAIN, CalibrationBinV1, CalibrationDataSplitV1, CapabilityEffectV1,
+    CapabilityKindV1, ChatCompletionEnvelopeV1, ConfusionMatrixV1, ContextFieldMetadataV1,
     ContextFieldProvenanceV1, ContextFieldV1, ContextProjectionClassV1, ContextProjectionV1,
     ContextReviewStateV1, ContextSensitivityV1, ContractError, EVALUATOR_RELEASE_SCHEMA_VERSION,
     EvaluationCriterionV1, EvaluationEvidenceCatalogV1, EvaluationEvidenceCitationV1,
     EvaluationEvidenceKindV1, EvaluationEvidenceLocationV1, EvaluationEvidenceRecordV1,
     EvaluationImplementationV1, EvaluationInputBoundsV1, EvaluationTargetKind,
-    EvaluatorReleaseSpecV1, IdempotencyClassV1, LEARNED_EVALUATION_SCHEMA_VERSION,
-    LearnedAbstentionReasonV1, LearnedEvaluationV1, LearnedTaskKind, LearnedVerdictV1,
-    ProviderExecutionFailureV1, ProviderExecutionStageV1, ProviderResponseEnvelopeV1,
-    ProviderTokenUsageV1, SuccessCriterionImportanceV1, SuccessCriterionV1,
-    TRACE_CONTEXT_BINDING_SCHEMA_VERSION, TaxonomyAssignmentSourceV1, TaxonomyAssignmentV1,
-    TaxonomyDimensionV1, TaxonomyLineageOperationV1, TaxonomyNodeStateV1, TaxonomyNodeV1,
-    TaxonomyOpenSetStateV1, TaxonomyRelationKindV1, TaxonomyRelationV1,
+    EvaluatorReleaseSpecV1, GROUPED_BOOTSTRAP_MACRO_F1_ITERATIONS_V1,
+    GROUPED_BOOTSTRAP_MACRO_F1_METHOD_V1, GROUPED_BOOTSTRAP_MACRO_F1_SEED_V1,
+    GroupedBootstrapIntervalV1, HumanAgreementReportV1, IdempotencyClassV1,
+    LEARNED_EVALUATION_SCHEMA_VERSION, LearnedAbstentionReasonV1, LearnedCalibrationFeaturesV1,
+    LearnedEvaluationV1, LearnedTaskKind, LearnedVerdictV1, ProviderExecutionFailureV1,
+    ProviderExecutionStageV1, ProviderResponseEnvelopeV1, ProviderTokenUsageV1,
+    SelectiveRiskPointV1, SuccessCriterionImportanceV1, SuccessCriterionV1,
+    TASK_COMPLETION_EVIDENCE_SYSTEM_PROMPT_V2, TASK_COMPLETION_JUDGMENT_SCHEMA_VERSION,
+    TASK_COMPLETION_PROJECTION_SCHEMA_VERSION, TASK_COMPLETION_PROJECTOR_VERSION,
+    TRACE_CONTEXT_BINDING_SCHEMA_VERSION, TaskCompletionCapabilityV1,
+    TaskCompletionContentPolicyV1, TaskCompletionCriterionJudgmentV1,
+    TaskCompletionCriterionOutcomeV1, TaskCompletionCriterionSpecV1, TaskCompletionDeclaredFieldV1,
+    TaskCompletionEvaluator, TaskCompletionExecutionV1, TaskCompletionJudgmentV1,
+    TaskCompletionOutcomeV1, TaskCompletionProjectionV1, TaskCompletionProjectorV1,
+    TaskCompletionToolObservationV1, TaskCompletionTraceObservationV1, TaxonomyAssignmentSourceV1,
+    TaxonomyAssignmentV1, TaxonomyDimensionV1, TaxonomyLineageOperationV1, TaxonomyNodeStateV1,
+    TaxonomyNodeV1, TaxonomyOpenSetStateV1, TaxonomyRelationKindV1, TaxonomyRelationV1,
     TraceContextBindingProvenanceV1, TraceContextBindingResolutionV1, TraceContextBindingV1,
-    canonical_content_id, canonical_json_bytes,
+    canonical_content_id, canonical_json_bytes, task_completion_judgment_response_schema,
 };
 pub use model::{
     EvalCase, FactQuality, PayloadIdentity, SourceSpanStatus, Span, SpanEvent, SpanKind, SpanLink,
     SpanProvenance, Trace,
 };
 pub use project::{DEFAULT_PROJECT_NAME, ProjectName};
+pub use providers::chat::{ChatClient, ChatRequest, ResponseSchema};
+#[cfg(any(feature = "llm-judge-openai", feature = "cluster-label-openai"))]
+pub use providers::openai_dive::chat::OpenAiChatClient;
 pub use report::{
     CalibrationImpact, ClusterIssue, ClusterScore, EvaluationReport, EvaluatorScore, FailedCase,
 };
@@ -228,21 +247,33 @@ pub mod prelude {
     pub use crate::learned::{
         AgentArchitectureContextV1, AgentCapabilityV1, AgentContextReleaseV1,
         AgentEvaluationContextV1, AgentIdentityContextV1, AgentIntentContextV1,
-        AgentPolicyContextV1, AgentTaxonomyReleaseV1, CapabilityEffectV1, CapabilityKindV1,
-        ChatCompletionEnvelopeV1, ContextFieldMetadataV1, ContextFieldProvenanceV1, ContextFieldV1,
-        ContextProjectionClassV1, ContextProjectionV1, ContextReviewStateV1, ContextSensitivityV1,
-        ContractError, EvaluationCriterionV1, EvaluationEvidenceCatalogV1,
-        EvaluationEvidenceCitationV1, EvaluationEvidenceKindV1, EvaluationEvidenceLocationV1,
-        EvaluationEvidenceRecordV1, EvaluationImplementationV1, EvaluationInputBoundsV1,
-        EvaluationTargetKind, EvaluatorReleaseSpecV1, IdempotencyClassV1,
-        LearnedAbstentionReasonV1, LearnedEvaluationV1, LearnedTaskKind, LearnedVerdictV1,
+        AgentPolicyContextV1, AgentTaxonomyReleaseV1, AgreementLabelScaleV1, AgreementRatingV1,
+        BINARY_CALIBRATION_MODEL_SCHEMA_VERSION, BinaryCalibrationExampleV1,
+        BinaryCalibrationFitOptionsV1, BinaryCalibrationModelV1, BinaryCalibrationReportV1,
+        BinaryPredictionV1, BinomialRateIntervalV1, CONTEXT_PROJECTION_HASH_DOMAIN,
+        CalibrationBinV1, CalibrationDataSplitV1, CapabilityEffectV1, CapabilityKindV1,
+        ChatCompletionEnvelopeV1, ConfusionMatrixV1, ContextFieldMetadataV1,
+        ContextFieldProvenanceV1, ContextFieldV1, ContextProjectionClassV1, ContextProjectionV1,
+        ContextReviewStateV1, ContextSensitivityV1, ContractError, EvaluationCriterionV1,
+        EvaluationEvidenceCatalogV1, EvaluationEvidenceCitationV1, EvaluationEvidenceKindV1,
+        EvaluationEvidenceLocationV1, EvaluationEvidenceRecordV1, EvaluationImplementationV1,
+        EvaluationInputBoundsV1, EvaluationTargetKind, EvaluatorReleaseSpecV1,
+        HumanAgreementReportV1, IdempotencyClassV1, LearnedAbstentionReasonV1,
+        LearnedCalibrationFeaturesV1, LearnedEvaluationV1, LearnedTaskKind, LearnedVerdictV1,
         ProviderExecutionFailureV1, ProviderExecutionStageV1, ProviderResponseEnvelopeV1,
-        ProviderTokenUsageV1, SuccessCriterionImportanceV1, SuccessCriterionV1,
-        TaxonomyAssignmentSourceV1, TaxonomyAssignmentV1, TaxonomyDimensionV1,
-        TaxonomyLineageOperationV1, TaxonomyNodeStateV1, TaxonomyNodeV1, TaxonomyOpenSetStateV1,
-        TaxonomyRelationKindV1, TaxonomyRelationV1, TraceContextBindingProvenanceV1,
-        TraceContextBindingResolutionV1, TraceContextBindingV1, canonical_content_id,
-        canonical_json_bytes,
+        ProviderTokenUsageV1, SelectiveRiskPointV1, SuccessCriterionImportanceV1,
+        SuccessCriterionV1, TASK_COMPLETION_JUDGMENT_SCHEMA_VERSION,
+        TASK_COMPLETION_PROJECTION_SCHEMA_VERSION, TASK_COMPLETION_PROJECTOR_VERSION,
+        TaskCompletionCapabilityV1, TaskCompletionContentPolicyV1,
+        TaskCompletionCriterionJudgmentV1, TaskCompletionCriterionOutcomeV1,
+        TaskCompletionCriterionSpecV1, TaskCompletionDeclaredFieldV1, TaskCompletionEvaluator,
+        TaskCompletionExecutionV1, TaskCompletionJudgmentV1, TaskCompletionOutcomeV1,
+        TaskCompletionProjectionV1, TaskCompletionProjectorV1, TaskCompletionToolObservationV1,
+        TaskCompletionTraceObservationV1, TaxonomyAssignmentSourceV1, TaxonomyAssignmentV1,
+        TaxonomyDimensionV1, TaxonomyLineageOperationV1, TaxonomyNodeStateV1, TaxonomyNodeV1,
+        TaxonomyOpenSetStateV1, TaxonomyRelationKindV1, TaxonomyRelationV1,
+        TraceContextBindingProvenanceV1, TraceContextBindingResolutionV1, TraceContextBindingV1,
+        canonical_content_id, canonical_json_bytes, task_completion_judgment_response_schema,
     };
     pub use crate::model::{
         EvalCase, FactQuality, PayloadIdentity, SourceSpanStatus, Span, SpanEvent, SpanKind,
@@ -255,4 +286,6 @@ pub mod prelude {
     pub use crate::validation::{
         ValidationIssue, ValidationProfile, ValidationReport, ValidationSeverity,
     };
+    #[cfg(feature = "llm-judge-openai")]
+    pub use crate::{OpenAiChatClient, OpenAiTaskCompletionEvaluator};
 }
