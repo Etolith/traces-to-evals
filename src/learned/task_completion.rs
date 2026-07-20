@@ -1297,12 +1297,18 @@ where
             &self.evaluator_release,
         ) {
             Ok(evaluation) => evaluation,
-            Err(_) => local_abstention(
-                projection,
-                binding,
-                &self.evaluator_release,
-                LearnedAbstentionReasonV1::InvalidProviderOutput,
-            )?,
+            Err(error) => {
+                let mut evaluation = local_abstention(
+                    projection,
+                    binding,
+                    &self.evaluator_release,
+                    LearnedAbstentionReasonV1::InvalidProviderOutput,
+                )?;
+                evaluation.explanation = format!(
+                    "Task completion abstained because the provider output failed contract validation: {error}"
+                );
+                evaluation
+            }
         };
         Ok(TaskCompletionExecutionV1 {
             evaluation,
@@ -2023,6 +2029,12 @@ mod tests {
         assert_eq!(
             execution.evaluation.abstention_reason,
             Some(LearnedAbstentionReasonV1::InvalidProviderOutput)
+        );
+        assert!(
+            execution
+                .evaluation
+                .explanation
+                .contains("unknown evidence key")
         );
     }
 
