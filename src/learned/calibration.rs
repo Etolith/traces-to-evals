@@ -5,6 +5,10 @@ use serde::{Deserialize, Serialize};
 use super::{ContractError, canonical_content_id, require_non_empty, require_sha256};
 
 pub const BINARY_CALIBRATION_MODEL_SCHEMA_VERSION: &str = "traceeval.binary_calibration_model.v1";
+pub const GROUPED_BOOTSTRAP_MACRO_F1_METHOD_V1: &str =
+    "grouped_percentile_bootstrap_macro_f1_splitmix64.v1";
+pub const GROUPED_BOOTSTRAP_MACRO_F1_ITERATIONS_V1: u32 = 10_000;
+pub const GROUPED_BOOTSTRAP_MACRO_F1_SEED_V1: u64 = 0x5454_4502;
 const BINARY_CALIBRATION_MODEL_HASH_DOMAIN: &str = "traceeval.binary-calibration-model.v1";
 const FEATURE_NAMES: [&str; 10] = [
     "normalized_failure_score",
@@ -374,6 +378,21 @@ pub struct BinomialRateIntervalV1 {
     pub method: String,
 }
 
+/// A portable percentile interval produced by resampling independent groups,
+/// never individual observations. Invalid replicates (for example, a draw
+/// containing only one class) are excluded and counted explicitly.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GroupedBootstrapIntervalV1 {
+    pub estimate: f64,
+    pub lower_95: f64,
+    pub upper_95: f64,
+    pub method: String,
+    pub seed: u64,
+    pub iterations: u32,
+    pub valid_iterations: u32,
+    pub independent_group_count: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BinaryCalibrationReportV1 {
     pub evaluator_release_id: String,
@@ -384,6 +403,12 @@ pub struct BinaryCalibrationReportV1 {
     pub attempted_count: u64,
     pub decided_count: u64,
     pub abstained_count: u64,
+    #[serde(default)]
+    pub independent_group_count: u64,
+    #[serde(default)]
+    pub bootstrap_iterations: u32,
+    #[serde(default)]
+    pub bootstrap_seed: u64,
     pub confusion: ConfusionMatrixV1,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub precision: Option<f64>,
@@ -401,6 +426,8 @@ pub struct BinaryCalibrationReportV1 {
     pub f1: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub macro_f1: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub macro_f1_interval: Option<GroupedBootstrapIntervalV1>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub matthews_correlation: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -437,6 +464,7 @@ impl BinaryCalibrationReportV1 {
         let mut calibration_model_id = None::<&str>;
         let mut split = None::<CalibrationDataSplitV1>;
         let mut decided = Vec::new();
+        let mut groups = BTreeMap::<&str, Vec<(f64, bool)>>::new();
         for prediction in predictions {
             require_non_empty(
                 &prediction.observation_id,
@@ -479,9 +507,11 @@ impl BinaryCalibrationReportV1 {
                 None => split = Some(prediction.split),
                 _ => {}
             }
+            let group = groups.entry(prediction.group_id.as_str()).or_default();
             if let Some(probability) = prediction.probability_failure {
                 validate_probability(probability, "probability_failure")?;
                 decided.push((probability, prediction.label_failure));
+                group.push((probability, prediction.label_failure));
             }
         }
 
@@ -521,6 +551,15 @@ impl BinaryCalibrationReportV1 {
             (Some(positive), Some(negative)) => Some((positive + negative) / 2.0),
             _ => None,
         };
+        let macro_f1_interval = macro_f1.and_then(|estimate| {
+            grouped_bootstrap_macro_f1_95(
+                groups.values(),
+                decision_threshold,
+                estimate,
+                GROUPED_BOOTSTRAP_MACRO_F1_ITERATIONS_V1,
+                GROUPED_BOOTSTRAP_MACRO_F1_SEED_V1,
+            )
+        });
         let matthews_correlation = matthews(&confusion);
         let (average_precision, auprc_trapezoid) = precision_recall_areas(&decided);
         let brier_score = (!decided.is_empty()).then(|| {
@@ -551,6 +590,9 @@ impl BinaryCalibrationReportV1 {
             attempted_count,
             decided_count,
             abstained_count: attempted_count - decided_count,
+            independent_group_count: groups.len() as u64,
+            bootstrap_iterations: GROUPED_BOOTSTRAP_MACRO_F1_ITERATIONS_V1,
+            bootstrap_seed: GROUPED_BOOTSTRAP_MACRO_F1_SEED_V1,
             confusion,
             precision,
             precision_interval,
@@ -560,6 +602,7 @@ impl BinaryCalibrationReportV1 {
             specificity_interval,
             f1,
             macro_f1,
+            macro_f1_interval,
             matthews_correlation,
             average_precision,
             auprc_trapezoid,
@@ -602,6 +645,137 @@ fn wilson_95(successes: u64, trials: u64) -> Option<BinomialRateIntervalV1> {
         upper_95,
         method: "wilson_score_95".into(),
     })
+}
+
+#[derive(Clone, Copy, Default)]
+struct BootstrapConfusion {
+    true_positive: u64,
+    false_positive: u64,
+    true_negative: u64,
+    false_negative: u64,
+}
+
+impl BootstrapConfusion {
+    fn add_assign(&mut self, other: Self) {
+        self.true_positive += other.true_positive;
+        self.false_positive += other.false_positive;
+        self.true_negative += other.true_negative;
+        self.false_negative += other.false_negative;
+    }
+}
+
+fn grouped_bootstrap_macro_f1_95<'a>(
+    groups: impl Iterator<Item = &'a Vec<(f64, bool)>>,
+    threshold: f64,
+    estimate: f64,
+    iterations: u32,
+    seed: u64,
+) -> Option<GroupedBootstrapIntervalV1> {
+    let groups = groups
+        .map(|group| {
+            let mut counts = BootstrapConfusion::default();
+            for (probability, label) in group {
+                match (*probability >= threshold, *label) {
+                    (true, true) => counts.true_positive += 1,
+                    (true, false) => counts.false_positive += 1,
+                    (false, false) => counts.true_negative += 1,
+                    (false, true) => counts.false_negative += 1,
+                }
+            }
+            counts
+        })
+        .collect::<Vec<_>>();
+    if groups.is_empty() || iterations == 0 {
+        return None;
+    }
+
+    let mut generator = SplitMix64::new(seed);
+    let mut statistics = Vec::with_capacity(iterations as usize);
+    for _ in 0..iterations {
+        let mut counts = BootstrapConfusion::default();
+        for _ in 0..groups.len() {
+            let index = generator.next_bounded(groups.len());
+            counts.add_assign(groups[index]);
+        }
+        if let Some(statistic) = macro_f1_from_bootstrap_counts(counts) {
+            statistics.push(statistic);
+        }
+    }
+    if statistics.is_empty() {
+        return None;
+    }
+    statistics.sort_by(f64::total_cmp);
+
+    Some(GroupedBootstrapIntervalV1 {
+        estimate,
+        lower_95: percentile(&statistics, 0.025),
+        upper_95: percentile(&statistics, 0.975),
+        method: GROUPED_BOOTSTRAP_MACRO_F1_METHOD_V1.into(),
+        seed,
+        iterations,
+        valid_iterations: statistics.len() as u32,
+        independent_group_count: groups.len() as u64,
+    })
+}
+
+fn macro_f1_from_bootstrap_counts(counts: BootstrapConfusion) -> Option<f64> {
+    let positive_f1 = harmonic_mean(
+        ratio(
+            counts.true_positive,
+            counts.true_positive + counts.false_positive,
+        ),
+        ratio(
+            counts.true_positive,
+            counts.true_positive + counts.false_negative,
+        ),
+    );
+    let negative_f1 = harmonic_mean(
+        ratio(
+            counts.true_negative,
+            counts.true_negative + counts.false_negative,
+        ),
+        ratio(
+            counts.true_negative,
+            counts.true_negative + counts.false_positive,
+        ),
+    );
+    positive_f1
+        .zip(negative_f1)
+        .map(|(positive, negative)| (positive + negative) / 2.0)
+}
+
+/// Hyndman-Fan type 7, matching the default linear percentile definition used
+/// by common offline scoring tools while avoiding any platform RNG dependency.
+fn percentile(sorted: &[f64], probability: f64) -> f64 {
+    let rank = probability * (sorted.len() - 1) as f64;
+    let lower_index = rank.floor() as usize;
+    let upper_index = rank.ceil() as usize;
+    let weight = rank - lower_index as f64;
+    sorted[lower_index] * (1.0 - weight) + sorted[upper_index] * weight
+}
+
+/// Small, fully specified generator used only to make certification bootstrap
+/// reports reproducible across machines and crate feature sets.
+struct SplitMix64 {
+    state: u64,
+}
+
+impl SplitMix64 {
+    const fn new(seed: u64) -> Self {
+        Self { state: seed }
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        self.state = self.state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+        let mut value = self.state;
+        value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        value ^ (value >> 31)
+    }
+
+    fn next_bounded(&mut self, upper_exclusive: usize) -> usize {
+        ((self.next_u64() as u128 * upper_exclusive as u128) >> 64) as usize
+    }
 }
 
 fn feature_standardization(
@@ -1046,6 +1220,12 @@ mod tests {
         assert_eq!(report.attempted_count, 5);
         assert_eq!(report.decided_count, 4);
         assert_eq!(report.abstained_count, 1);
+        assert_eq!(report.independent_group_count, 5);
+        assert_eq!(
+            report.bootstrap_iterations,
+            GROUPED_BOOTSTRAP_MACRO_F1_ITERATIONS_V1
+        );
+        assert_eq!(report.bootstrap_seed, GROUPED_BOOTSTRAP_MACRO_F1_SEED_V1);
         assert_eq!(report.confusion.true_positive, 1);
         assert_eq!(report.confusion.false_positive, 1);
         assert_eq!(report.confusion.true_negative, 1);
@@ -1062,6 +1242,9 @@ mod tests {
         assert_eq!(precision_interval.method, "wilson_score_95");
         assert_eq!(report.f1, Some(0.5));
         assert_eq!(report.macro_f1, Some(0.5));
+        let macro_f1_interval = report.macro_f1_interval.as_ref().unwrap();
+        assert_eq!(macro_f1_interval.independent_group_count, 5);
+        assert!(macro_f1_interval.valid_iterations < macro_f1_interval.iterations);
         assert_eq!(report.matthews_correlation, Some(0.0));
         assert!(report.brier_score.unwrap() > 0.3);
         assert_eq!(report.selective_risk.last().unwrap().coverage, 0.8);
@@ -1134,6 +1317,108 @@ mod tests {
         assert_eq!(report.calibration_bins[1].absolute_gap, None);
         assert!(!report.calibration_bins[0].upper_bound_inclusive);
         assert!(report.calibration_bins[3].upper_bound_inclusive);
+    }
+
+    #[test]
+    fn grouped_bootstrap_interval_is_stable_and_serializable() {
+        let predictions = (0..24)
+            .map(|index| {
+                let label_failure = index % 3 == 0;
+                BinaryPredictionV1 {
+                    observation_id: format!("observation-{index:02}"),
+                    group_id: format!("session-{:02}", index / 2),
+                    evaluator_release_id: digest('a'),
+                    calibration_model_id: digest('b'),
+                    split: CalibrationDataSplitV1::Test,
+                    probability_failure: Some(if index % 5 == 0 {
+                        0.8
+                    } else if label_failure {
+                        0.7
+                    } else {
+                        0.2
+                    }),
+                    label_failure,
+                }
+            })
+            .collect::<Vec<_>>();
+        let mut reordered = predictions.clone();
+        reordered.reverse();
+
+        let first = BinaryCalibrationReportV1::from_predictions(&predictions, 0.5, 5).unwrap();
+        let second = BinaryCalibrationReportV1::from_predictions(&reordered, 0.5, 5).unwrap();
+        let interval = first.macro_f1_interval.as_ref().unwrap();
+
+        assert_eq!(first, second);
+        assert_eq!(interval.method, GROUPED_BOOTSTRAP_MACRO_F1_METHOD_V1);
+        assert_eq!(interval.seed, GROUPED_BOOTSTRAP_MACRO_F1_SEED_V1);
+        assert_eq!(
+            interval.iterations,
+            GROUPED_BOOTSTRAP_MACRO_F1_ITERATIONS_V1
+        );
+        assert_eq!(interval.independent_group_count, 12);
+        let serialized = serde_json::to_string(interval).unwrap();
+        assert_eq!(
+            serde_json::from_str::<GroupedBootstrapIntervalV1>(&serialized).unwrap(),
+            *interval
+        );
+    }
+
+    #[test]
+    fn grouped_bootstrap_keeps_every_group_intact() {
+        let predictions = (0..80)
+            .map(|index| {
+                let perfect_group = index < 40;
+                let label_failure = index % 2 == 0;
+                let predicted_failure = if perfect_group {
+                    label_failure
+                } else {
+                    !label_failure
+                };
+                BinaryPredictionV1 {
+                    observation_id: format!("observation-{index}"),
+                    group_id: if perfect_group { "perfect" } else { "wrong" }.into(),
+                    evaluator_release_id: digest('a'),
+                    calibration_model_id: digest('b'),
+                    split: CalibrationDataSplitV1::Test,
+                    probability_failure: Some(if predicted_failure { 0.9 } else { 0.1 }),
+                    label_failure,
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let report = BinaryCalibrationReportV1::from_predictions(&predictions, 0.5, 5).unwrap();
+        let interval = report.macro_f1_interval.unwrap();
+
+        assert_eq!(report.independent_group_count, 2);
+        assert_eq!(interval.valid_iterations, interval.iterations);
+        assert_eq!(interval.lower_95, 0.0);
+        assert_eq!(interval.upper_95, 1.0);
+    }
+
+    #[test]
+    fn separable_groups_have_a_certifying_macro_f1_lower_bound() {
+        let predictions = (0..24)
+            .map(|index| {
+                let label_failure = index % 2 == 0;
+                BinaryPredictionV1 {
+                    observation_id: format!("observation-{index}"),
+                    group_id: format!("session-{index}"),
+                    evaluator_release_id: digest('a'),
+                    calibration_model_id: digest('b'),
+                    split: CalibrationDataSplitV1::Test,
+                    probability_failure: Some(if label_failure { 0.95 } else { 0.05 }),
+                    label_failure,
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let report = BinaryCalibrationReportV1::from_predictions(&predictions, 0.5, 5).unwrap();
+        let interval = report.macro_f1_interval.unwrap();
+
+        assert_eq!(interval.estimate, 1.0);
+        assert!(interval.lower_95 > 0.206);
+        assert!(interval.lower_95 > 0.053);
+        assert!(interval.lower_95 > 0.0);
     }
 
     #[test]

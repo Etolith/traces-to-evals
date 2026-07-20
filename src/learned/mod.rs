@@ -13,7 +13,9 @@ pub use calibration::{
     BINARY_CALIBRATION_MODEL_SCHEMA_VERSION, BinaryCalibrationExampleV1,
     BinaryCalibrationFitOptionsV1, BinaryCalibrationModelV1, BinaryCalibrationReportV1,
     BinaryPredictionV1, BinomialRateIntervalV1, CalibrationBinV1, CalibrationDataSplitV1,
-    ConfusionMatrixV1, LearnedCalibrationFeaturesV1, SelectiveRiskPointV1,
+    ConfusionMatrixV1, GROUPED_BOOTSTRAP_MACRO_F1_ITERATIONS_V1,
+    GROUPED_BOOTSTRAP_MACRO_F1_METHOD_V1, GROUPED_BOOTSTRAP_MACRO_F1_SEED_V1,
+    GroupedBootstrapIntervalV1, LearnedCalibrationFeaturesV1, SelectiveRiskPointV1,
 };
 pub use canonical::{
     AGENT_CONTEXT_RELEASE_HASH_DOMAIN, AGENT_TAXONOMY_RELEASE_HASH_DOMAIN,
