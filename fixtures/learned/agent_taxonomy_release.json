@@ -1,0 +1,25 @@
+{
+  "schema_version": "traceeval.agent_taxonomy_release.v1",
+  "taxonomy_id": "taxonomy:agent-quality",
+  "nodes": [
+    {
+      "node_id": "missing_evidence",
+      "dimension": "failure_mode",
+      "name": "Missing evidence",
+      "description": "Completion lacks evidence",
+      "parent_ids": ["failure"],
+      "state": "active",
+      "provenance": "human_review",
+      "sensitivity": "internal"
+    },
+    {
+      "node_id": "failure",
+      "dimension": "failure_mode",
+      "name": "Failure",
+      "description": "Observed failure",
+      "state": "active",
+      "provenance": "user_declared",
+      "sensitivity": "internal"
+    }
+  ]
+}
