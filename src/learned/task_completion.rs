@@ -765,12 +765,18 @@ fn has_native_tool_children_with_duplicated_terminal_output(
     trajectory_items.saturating_mul(2) >= items.len()
 }
 
+#[derive(Clone, Copy)]
+struct EvidenceSegmentIdentity<'a> {
+    key_suffix: &'a str,
+    span_id: &'a str,
+}
+
 fn project_span_summary(
     content_policy: TaskCompletionContentPolicyV1,
     value: Option<&str>,
     evidence_prefix: &str,
     evidence_kind: EvaluationEvidenceKindV1,
-    span_id: &str,
+    identity: EvidenceSegmentIdentity<'_>,
     maximum_bytes: u32,
     pending_records: &mut BTreeMap<
         String,
@@ -788,13 +794,13 @@ fn project_span_summary(
     if summary.is_empty() {
         return (None, None, truncated);
     }
-    let key = evidence_key(evidence_prefix, span_id);
+    let key = evidence_key(evidence_prefix, identity.key_suffix);
     pending_records.insert(
         key.clone(),
         (
             evidence_kind,
             EvaluationEvidenceLocationV1::Segment {
-                span_id: span_id.into(),
+                span_id: identity.span_id.into(),
                 start_byte: 0,
                 end_byte: u32::try_from(summary.len()).unwrap_or(u32::MAX),
             },
@@ -850,6 +856,7 @@ impl TaskCompletionProjectorV1 {
                 "content_truncation_policy": "field_level_flags_and_material_abstention_v1",
                 "tool_summary_bytes": "min(max_summary_bytes,1024)",
                 "terminal_tool_trajectory_policy": "omit_when_native_children_are_present_v1",
+                "evidence_key_policy": "projection_local_positional_aliases_v1",
             }),
             _ => return Err(task_error("unsupported task-completion projector version")),
         };
@@ -1067,7 +1074,7 @@ impl TaskCompletionProjectorV1 {
         let mut pending_records = BTreeMap::new();
         let mut truncated = false;
         if let Some(terminal) = terminal {
-            let key = evidence_key("terminal-span", &terminal.id);
+            let key = evidence_key("terminal-span", "0");
             trace_observation.evidence_keys.push(key.clone());
             pending_records.insert(
                 key,
@@ -1092,7 +1099,7 @@ impl TaskCompletionProjectorV1 {
                         output.len() > self.max_summary_bytes as usize;
                     let summary = bound_utf8(output, self.max_summary_bytes);
                     if !summary.is_empty() {
-                        let key = evidence_key("terminal-output", &terminal.id);
+                        let key = evidence_key("terminal-output", "0");
                         pending_records.insert(
                             key.clone(),
                             (
@@ -1128,7 +1135,8 @@ impl TaskCompletionProjectorV1 {
             .take(self.max_tool_observations as usize)
             .enumerate()
         {
-            let key = evidence_key("tool-span", &span.id);
+            let evidence_identity = index.to_string();
+            let key = evidence_key("tool-span", &evidence_identity);
             pending_records.insert(
                 key.clone(),
                 (
@@ -1143,7 +1151,10 @@ impl TaskCompletionProjectorV1 {
                 span.input.as_deref(),
                 "tool-input",
                 EvaluationEvidenceKindV1::InputSegment,
-                &span.id,
+                EvidenceSegmentIdentity {
+                    key_suffix: &evidence_identity,
+                    span_id: &span.id,
+                },
                 tool_summary_bytes(self.max_summary_bytes),
                 &mut pending_records,
             );
@@ -1152,7 +1163,10 @@ impl TaskCompletionProjectorV1 {
                 span.output.as_deref(),
                 "tool-output",
                 EvaluationEvidenceKindV1::OutputSegment,
-                &span.id,
+                EvidenceSegmentIdentity {
+                    key_suffix: &evidence_identity,
+                    span_id: &span.id,
+                },
                 tool_summary_bytes(self.max_summary_bytes),
                 &mut pending_records,
             );
@@ -1946,24 +1960,9 @@ mod tests {
                 .get("agent.state.observation"),
             Some(&json!("verified_changed"))
         );
-        assert!(
-            first
-                .evidence_catalog
-                .entries
-                .contains_key("tool-span:tool-1")
-        );
-        assert!(
-            first
-                .evidence_catalog
-                .entries
-                .contains_key("tool-input:tool-1")
-        );
-        assert!(
-            first
-                .evidence_catalog
-                .entries
-                .contains_key("tool-output:tool-1")
-        );
+        assert!(first.evidence_catalog.entries.contains_key("tool-span:0"));
+        assert!(first.evidence_catalog.entries.contains_key("tool-input:0"));
+        assert!(first.evidence_catalog.entries.contains_key("tool-output:0"));
     }
 
     #[test]
@@ -2224,7 +2223,7 @@ mod tests {
             &trace(),
         )
         .unwrap();
-        let evidence_key = "tool-span:tool-1".to_string();
+        let evidence_key = "tool-span:0".to_string();
         let calls = Arc::new(AtomicUsize::new(0));
         let evaluator = TaskCompletionEvaluator::new(
             FakeChatClient {
@@ -2263,15 +2262,7 @@ mod tests {
         let context = context();
         let binding = binding(&context);
         let context_projection = context_projection(&context);
-        let mut observed_trace = trace();
-        let exact_span_id = "0123456789abcdef0123456789abcdef";
-        observed_trace
-            .spans
-            .iter_mut()
-            .find(|span| span.id == "tool-1")
-            .unwrap()
-            .id = exact_span_id.into();
-        let projection = TaskCompletionProjectorV1 {
+        let mut projection = TaskCompletionProjectorV1 {
             content_policy: TaskCompletionContentPolicyV1::PreRedactedSummaries,
             ..Default::default()
         }
@@ -2281,48 +2272,20 @@ mod tests {
             &binding,
             Some(&context),
             Some(&context_projection),
-            &observed_trace,
+            &trace(),
         )
         .unwrap();
-        let shortened_key = "tool-span:0123456789ab".to_string();
-        let exact_key = format!("tool-span:{exact_span_id}");
-        let calls = Arc::new(AtomicUsize::new(0));
-        let evaluator = TaskCompletionEvaluator::new(
-            FakeChatClient {
-                calls: calls.clone(),
-                output: serde_json::to_value(TaskCompletionJudgmentV1 {
-                    schema_version: TASK_COMPLETION_JUDGMENT_SCHEMA_VERSION.into(),
-                    outcome: TaskCompletionOutcomeV1::Completed,
-                    completion_score: Some(1.0),
-                    model_reported_confidence: Some(0.9),
-                    explanation: "completed".into(),
-                    evidence_keys: vec![shortened_key.clone()],
-                    criteria: vec![TaskCompletionCriterionJudgmentV1 {
-                        criterion_id: "criterion-1".into(),
-                        outcome: TaskCompletionCriterionOutcomeV1::Satisfied,
-                        score: Some(1.0),
-                        evidence_keys: vec![shortened_key],
-                    }],
-                    abstention_reason: None,
-                })
-                .unwrap(),
-            },
-            "test-model",
-            release(&projection),
-        )
-        .unwrap();
-        let execution =
-            futures::executor::block_on(evaluator.evaluate(&projection, &binding)).unwrap();
+        let exact_key = "tool-span:0123456789abcdef0123456789abcdef";
+        let record = projection.evidence_catalog.entries["tool-span:0"].clone();
+        projection
+            .evidence_catalog
+            .entries
+            .insert(exact_key.into(), record);
+        let mut keys = vec!["tool-span:0123456789ab".into()];
 
-        assert_eq!(calls.load(Ordering::SeqCst), 1);
-        assert_eq!(execution.evaluation.verdict, LearnedVerdictV1::Pass);
-        assert!(
-            execution
-                .evaluation
-                .evidence
-                .iter()
-                .all(|citation| citation.evidence_key == exact_key)
-        );
+        normalize_evidence_keys(&mut keys, &projection).unwrap();
+
+        assert_eq!(keys, vec![exact_key]);
     }
 
     #[test]
@@ -2343,7 +2306,7 @@ mod tests {
             &trace(),
         )
         .unwrap();
-        let record = projection.evidence_catalog.entries["tool-span:tool-1"].clone();
+        let record = projection.evidence_catalog.entries["tool-span:0"].clone();
         projection
             .evidence_catalog
             .entries
@@ -2397,12 +2360,12 @@ mod tests {
                     completion_score: Some(1.0),
                     model_reported_confidence: Some(0.9),
                     explanation: "completed from observed terminal evidence".into(),
-                    evidence_keys: vec!["terminal-span:root".into()],
+                    evidence_keys: vec!["terminal-span:0".into()],
                     criteria: vec![TaskCompletionCriterionJudgmentV1 {
                         criterion_id: "criterion-1".into(),
                         outcome: TaskCompletionCriterionOutcomeV1::Satisfied,
                         score: Some(1.0),
-                        evidence_keys: vec!["terminal-span:root".into()],
+                        evidence_keys: vec!["terminal-span:0".into()],
                     }],
                     abstention_reason: None,
                 })
