@@ -1116,7 +1116,16 @@ fn task_completion_response_schema() -> ResponseSchema {
         schema: json!({
             "type": "object",
             "additionalProperties": false,
-            "required": ["schema_version", "outcome", "explanation", "evidence_keys", "criteria"],
+            "required": [
+                "schema_version",
+                "outcome",
+                "completion_score",
+                "model_reported_confidence",
+                "explanation",
+                "evidence_keys",
+                "criteria",
+                "abstention_reason"
+            ],
             "properties": {
                 "schema_version": {"type": "string", "const": TASK_COMPLETION_JUDGMENT_SCHEMA_VERSION},
                 "outcome": {"type": "string", "enum": ["completed", "partial", "failed", "abstain"]},
@@ -1129,7 +1138,7 @@ fn task_completion_response_schema() -> ResponseSchema {
                     "items": {
                         "type": "object",
                         "additionalProperties": false,
-                        "required": ["criterion_id", "outcome", "evidence_keys"],
+                        "required": ["criterion_id", "outcome", "score", "evidence_keys"],
                         "properties": {
                             "criterion_id": {"type": "string"},
                             "outcome": {"type": "string", "enum": ["satisfied", "partially_satisfied", "unsatisfied", "unresolved"]},
@@ -1271,6 +1280,49 @@ mod tests {
     use serde::de::DeserializeOwned;
 
     use super::*;
+
+    fn assert_strict_object_requirements(schema: &Value) {
+        if schema.get("type").and_then(Value::as_str) == Some("object") {
+            let properties = schema
+                .get("properties")
+                .and_then(Value::as_object)
+                .expect("object schemas must declare properties");
+            let property_names = properties.keys().cloned().collect::<BTreeSet<_>>();
+            let required_names = schema
+                .get("required")
+                .and_then(Value::as_array)
+                .expect("strict object schemas must declare required")
+                .iter()
+                .map(|name| {
+                    name.as_str()
+                        .expect("required names must be strings")
+                        .to_string()
+                })
+                .collect::<BTreeSet<_>>();
+            assert_eq!(
+                required_names, property_names,
+                "strict provider schemas must require every property; nullable fields remain nullable"
+            );
+        }
+        match schema {
+            Value::Object(object) => {
+                for value in object.values() {
+                    assert_strict_object_requirements(value);
+                }
+            }
+            Value::Array(values) => {
+                for value in values {
+                    assert_strict_object_requirements(value);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn task_completion_response_schema_meets_strict_provider_requirements() {
+        assert_strict_object_requirements(&task_completion_judgment_response_schema());
+    }
     use crate::learned::{
         AGENT_CONTEXT_RELEASE_SCHEMA_VERSION, AgentArchitectureContextV1, AgentEvaluationContextV1,
         AgentIdentityContextV1, AgentIntentContextV1, AgentPolicyContextV1, ContextFieldMetadataV1,
