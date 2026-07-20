@@ -515,11 +515,15 @@ impl TaskCompletionJudgmentV1 {
     }
 
     pub fn into_learned_evaluation(
-        self,
+        mut self,
         projection: &TaskCompletionProjectionV1,
         binding: &TraceContextBindingV1,
         evaluator_release: &EvaluatorReleaseSpecV1,
     ) -> Result<LearnedEvaluationV1, ContractError> {
+        deduplicate_evidence_keys(&mut self.evidence_keys);
+        for criterion in &mut self.criteria {
+            deduplicate_evidence_keys(&mut criterion.evidence_keys);
+        }
         self.validate_against(projection)?;
         validate_release_and_binding(projection, binding, evaluator_release)?;
         let verdict = match self.outcome {
@@ -1525,6 +1529,11 @@ fn validate_evidence_keys(
     Ok(())
 }
 
+fn deduplicate_evidence_keys(keys: &mut Vec<String>) {
+    let mut seen = BTreeSet::new();
+    keys.retain(|key| seen.insert(key.clone()));
+}
+
 fn citation_for(
     key: &str,
     criterion_id: Option<String>,
@@ -2036,6 +2045,58 @@ mod tests {
                 .explanation
                 .contains("unknown evidence key")
         );
+    }
+
+    #[test]
+    fn repeated_valid_provider_citations_are_normalized() {
+        let context = context();
+        let binding = binding(&context);
+        let context_projection = context_projection(&context);
+        let projection = TaskCompletionProjectorV1 {
+            content_policy: TaskCompletionContentPolicyV1::PreRedactedSummaries,
+            ..Default::default()
+        }
+        .project(
+            "trace-1",
+            "rev-1",
+            &binding,
+            Some(&context),
+            Some(&context_projection),
+            &trace(),
+        )
+        .unwrap();
+        let evidence_key = "tool-span:tool-1".to_string();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let evaluator = TaskCompletionEvaluator::new(
+            FakeChatClient {
+                calls: calls.clone(),
+                output: serde_json::to_value(TaskCompletionJudgmentV1 {
+                    schema_version: TASK_COMPLETION_JUDGMENT_SCHEMA_VERSION.into(),
+                    outcome: TaskCompletionOutcomeV1::Completed,
+                    completion_score: Some(1.0),
+                    model_reported_confidence: Some(0.9),
+                    explanation: "completed".into(),
+                    evidence_keys: vec![evidence_key.clone(), evidence_key.clone()],
+                    criteria: vec![TaskCompletionCriterionJudgmentV1 {
+                        criterion_id: "criterion-1".into(),
+                        outcome: TaskCompletionCriterionOutcomeV1::Satisfied,
+                        score: Some(1.0),
+                        evidence_keys: vec![evidence_key.clone(), evidence_key],
+                    }],
+                    abstention_reason: None,
+                })
+                .unwrap(),
+            },
+            "test-model",
+            release(&projection),
+        )
+        .unwrap();
+        let execution =
+            futures::executor::block_on(evaluator.evaluate(&projection, &binding)).unwrap();
+
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(execution.evaluation.verdict, LearnedVerdictV1::Pass);
+        assert_eq!(execution.evaluation.evidence.len(), 2);
     }
 
     #[test]
