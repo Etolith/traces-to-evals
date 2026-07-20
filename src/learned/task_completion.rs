@@ -530,8 +530,10 @@ impl TaskCompletionJudgmentV1 {
         binding: &TraceContextBindingV1,
         evaluator_release: &EvaluatorReleaseSpecV1,
     ) -> Result<LearnedEvaluationV1, ContractError> {
+        normalize_evidence_keys(&mut self.evidence_keys, projection)?;
         deduplicate_evidence_keys(&mut self.evidence_keys);
         for criterion in &mut self.criteria {
+            normalize_evidence_keys(&mut criterion.evidence_keys, projection)?;
             deduplicate_evidence_keys(&mut criterion.evidence_keys);
         }
         self.validate_against(projection)?;
@@ -1580,6 +1582,39 @@ fn validate_evidence_keys(
     Ok(())
 }
 
+fn normalize_evidence_keys(
+    keys: &mut [String],
+    projection: &TaskCompletionProjectionV1,
+) -> Result<(), ContractError> {
+    for key in keys {
+        if projection.evidence_catalog.entries.contains_key(key) {
+            continue;
+        }
+        let Some((namespace, identity_prefix)) = key.rsplit_once(':') else {
+            return Err(task_error(format!("unknown evidence key {key}")));
+        };
+        if identity_prefix.len() < 12
+            || !identity_prefix.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err(task_error(format!("unknown evidence key {key}")));
+        }
+        let candidate_prefix = format!("{namespace}:{identity_prefix}");
+        let mut matches = projection
+            .evidence_catalog
+            .entries
+            .keys()
+            .filter(|candidate| candidate.starts_with(&candidate_prefix));
+        let Some(candidate) = matches.next() else {
+            return Err(task_error(format!("unknown evidence key {key}")));
+        };
+        if matches.next().is_some() {
+            return Err(task_error(format!("ambiguous evidence key prefix {key}")));
+        }
+        *key = candidate.clone();
+    }
+    Ok(())
+}
+
 fn deduplicate_evidence_keys(keys: &mut Vec<String>) {
     let mut seen = BTreeSet::new();
     keys.retain(|key| seen.insert(key.clone()));
@@ -2221,6 +2256,107 @@ mod tests {
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         assert_eq!(execution.evaluation.verdict, LearnedVerdictV1::Pass);
         assert_eq!(execution.evaluation.evidence.len(), 2);
+    }
+
+    #[test]
+    fn unique_long_evidence_prefix_is_normalized_to_the_exact_catalog_key() {
+        let context = context();
+        let binding = binding(&context);
+        let context_projection = context_projection(&context);
+        let mut observed_trace = trace();
+        let exact_span_id = "0123456789abcdef0123456789abcdef";
+        observed_trace
+            .spans
+            .iter_mut()
+            .find(|span| span.id == "tool-1")
+            .unwrap()
+            .id = exact_span_id.into();
+        let projection = TaskCompletionProjectorV1 {
+            content_policy: TaskCompletionContentPolicyV1::PreRedactedSummaries,
+            ..Default::default()
+        }
+        .project(
+            "trace-1",
+            "rev-1",
+            &binding,
+            Some(&context),
+            Some(&context_projection),
+            &observed_trace,
+        )
+        .unwrap();
+        let shortened_key = "tool-span:0123456789ab".to_string();
+        let exact_key = format!("tool-span:{exact_span_id}");
+        let calls = Arc::new(AtomicUsize::new(0));
+        let evaluator = TaskCompletionEvaluator::new(
+            FakeChatClient {
+                calls: calls.clone(),
+                output: serde_json::to_value(TaskCompletionJudgmentV1 {
+                    schema_version: TASK_COMPLETION_JUDGMENT_SCHEMA_VERSION.into(),
+                    outcome: TaskCompletionOutcomeV1::Completed,
+                    completion_score: Some(1.0),
+                    model_reported_confidence: Some(0.9),
+                    explanation: "completed".into(),
+                    evidence_keys: vec![shortened_key.clone()],
+                    criteria: vec![TaskCompletionCriterionJudgmentV1 {
+                        criterion_id: "criterion-1".into(),
+                        outcome: TaskCompletionCriterionOutcomeV1::Satisfied,
+                        score: Some(1.0),
+                        evidence_keys: vec![shortened_key],
+                    }],
+                    abstention_reason: None,
+                })
+                .unwrap(),
+            },
+            "test-model",
+            release(&projection),
+        )
+        .unwrap();
+        let execution =
+            futures::executor::block_on(evaluator.evaluate(&projection, &binding)).unwrap();
+
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(execution.evaluation.verdict, LearnedVerdictV1::Pass);
+        assert!(
+            execution
+                .evaluation
+                .evidence
+                .iter()
+                .all(|citation| citation.evidence_key == exact_key)
+        );
+    }
+
+    #[test]
+    fn ambiguous_evidence_prefix_is_rejected() {
+        let context = context();
+        let binding = binding(&context);
+        let context_projection = context_projection(&context);
+        let mut projection = TaskCompletionProjectorV1 {
+            content_policy: TaskCompletionContentPolicyV1::PreRedactedSummaries,
+            ..Default::default()
+        }
+        .project(
+            "trace-1",
+            "rev-1",
+            &binding,
+            Some(&context),
+            Some(&context_projection),
+            &trace(),
+        )
+        .unwrap();
+        let record = projection.evidence_catalog.entries["tool-span:tool-1"].clone();
+        projection
+            .evidence_catalog
+            .entries
+            .insert("tool-span:0123456789abcdef".into(), record.clone());
+        projection
+            .evidence_catalog
+            .entries
+            .insert("tool-span:0123456789abcfff".into(), record);
+        let mut keys = vec!["tool-span:0123456789abc".into()];
+
+        let error = normalize_evidence_keys(&mut keys, &projection).unwrap_err();
+
+        assert!(error.to_string().contains("ambiguous evidence key prefix"));
     }
 
     #[test]
