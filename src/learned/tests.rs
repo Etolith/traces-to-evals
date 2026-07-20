@@ -136,6 +136,7 @@ fn evaluator_release() -> EvaluatorReleaseSpecV1 {
         },
         projection_release_id: format!("sha256:{}", "8".repeat(64)),
         context_projection_release_id: format!("sha256:{}", "9".repeat(64)),
+        applicable_taxonomy_release_id: None,
         applicable_taxonomy_node_ids: BTreeSet::new(),
         input_bounds: EvaluationInputBoundsV1 {
             max_subjects: 1,
@@ -147,6 +148,19 @@ fn evaluator_release() -> EvaluatorReleaseSpecV1 {
         abstention_policy: json!({"on_missing_context": true}),
         code_artifact_hash: format!("sha256:{}", "0".repeat(64)),
     }
+}
+
+#[test]
+fn evaluator_taxonomy_applicability_requires_exact_release_identity() {
+    let mut release = evaluator_release();
+    release.applicable_taxonomy_node_ids = BTreeSet::from(["task.checkout".into()]);
+    assert!(release.validate().is_err());
+
+    release.applicable_taxonomy_release_id = Some(format!("sha256:{}", "a".repeat(64)));
+    release.validate().unwrap();
+    let first_id = release.release_id().unwrap();
+    release.applicable_taxonomy_release_id = Some(format!("sha256:{}", "b".repeat(64)));
+    assert_ne!(first_id, release.release_id().unwrap());
 }
 
 #[test]

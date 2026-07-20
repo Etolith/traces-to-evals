@@ -1397,6 +1397,7 @@ mod tests {
                 .context_projection_release_id
                 .clone()
                 .unwrap(),
+            applicable_taxonomy_release_id: None,
             applicable_taxonomy_node_ids: BTreeSet::new(),
             input_bounds: EvaluationInputBoundsV1 {
                 max_subjects: 1,
