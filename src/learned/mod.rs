@@ -1,6 +1,7 @@
 mod agreement;
 mod calibration;
 mod canonical;
+mod compact_task_completion;
 mod context;
 mod evaluation;
 mod evaluator;
@@ -21,6 +22,15 @@ pub use canonical::{
     AGENT_CONTEXT_RELEASE_HASH_DOMAIN, AGENT_TAXONOMY_RELEASE_HASH_DOMAIN,
     CONTEXT_PROJECTION_HASH_DOMAIN, EVALUATOR_RELEASE_HASH_DOMAIN, TAXONOMY_ASSIGNMENT_HASH_DOMAIN,
     TRACE_CONTEXT_BINDING_HASH_DOMAIN, canonical_content_id, canonical_json_bytes,
+};
+pub use compact_task_completion::{
+    BINARY_TASK_COMPLETION_DECISION_SCHEMA_VERSION, BinaryTaskCompletionDecisionV1,
+    BinaryTaskCompletionOutcomeV1, COMPACT_TASK_COMPLETION_PROJECTION_SCHEMA_VERSION,
+    CompactTaskCompletionProjectionStatsV1, CompactTaskCompletionProjectionV1,
+    CompactTaskCompletionTokenBudgetV1, CompactTaskCompletionVariantV1,
+    TaskCompletionEvidenceLaneV1, TaskCompletionGoalBundleV1, TaskCompletionInferenceProvenanceV1,
+    TaskCompletionRecoveryChainV1, TaskCompletionTraceFactV1, TraceFactActorV1, TraceFactKindV1,
+    TraceFactStatusV1,
 };
 pub use context::{
     AGENT_CONTEXT_RELEASE_SCHEMA_VERSION, AgentArchitectureContextV1, AgentCapabilityV1,
