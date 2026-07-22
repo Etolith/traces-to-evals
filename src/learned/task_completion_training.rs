@@ -686,7 +686,8 @@ mod tests {
             }),
         )
         .unwrap();
-        record.training_record_id = training_record_id(&projection, &record.structured_features).unwrap();
+        record.training_record_id =
+            training_record_id(&projection, &record.structured_features).unwrap();
 
         assert!(record.validate_against(&projection).is_err());
     }
