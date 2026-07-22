@@ -1,5 +1,6 @@
 mod agreement;
 mod calibration;
+mod compact_projector;
 mod task_completion;
 
 pub use traceeval_contracts::*;
@@ -12,6 +13,11 @@ pub use calibration::{
     ConfusionMatrixV1, GROUPED_BOOTSTRAP_MACRO_F1_ITERATIONS_V1,
     GROUPED_BOOTSTRAP_MACRO_F1_METHOD_V1, GROUPED_BOOTSTRAP_MACRO_F1_SEED_V1,
     GroupedBootstrapIntervalV1, LearnedCalibrationFeaturesV1, SelectiveRiskPointV1,
+};
+pub use compact_projector::{
+    COMPACT_TASK_COMPLETION_PROJECTOR_VERSION, CompactTaskCompletionProjector,
+    CompactTaskCompletionProjectorError, DEFAULT_COMPACT_TASK_COMPLETION_RUBRIC,
+    TaskCompletionTokenCounter,
 };
 #[cfg(feature = "llm-judge-openai")]
 pub use task_completion::OpenAiTaskCompletionEvaluator;
