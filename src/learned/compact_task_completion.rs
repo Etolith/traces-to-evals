@@ -651,7 +651,7 @@ fn validate_probability(value: f64, field: &str) -> Result<(), ContractError> {
 
 fn validate_evidence_id(value: &str) -> Result<(), ContractError> {
     let digits = value.strip_prefix('E').unwrap_or_default();
-    if digits.len() < 4 || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+    if digits.len() != 4 || digits == "0000" || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
         return Err(compact_error(
             "evidence_id must use the projection-local E0001 form",
         ));
@@ -805,6 +805,15 @@ mod tests {
             span_id: "different".into(),
         };
         assert!(changed.validate().is_err());
+    }
+
+    #[test]
+    fn evidence_ids_use_exactly_four_nonzero_digits() {
+        assert!(validate_evidence_id("E0001").is_ok());
+        assert!(validate_evidence_id("E9999").is_ok());
+        assert!(validate_evidence_id("E0000").is_err());
+        assert!(validate_evidence_id("E001").is_err());
+        assert!(validate_evidence_id("E00012").is_err());
     }
 
     #[test]
