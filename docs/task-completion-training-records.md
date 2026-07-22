@@ -8,7 +8,9 @@ trace projections and private model training.
 
 - immutable target, revision, context-binding, projector, and projection identities;
 - the bounded goal bundle, evidence facts, and recovery chains;
-- a versioned 39-value structured evidence vector; and
+- a versioned `TaskCompletionEvidenceFeatureRecordV1` containing the stable
+  39-name/39-value model vector generated from
+  `TaskCompletionStructuredEvidenceFeaturesV2`; and
 - content-derived feature and training-record identifiers.
 
 The transformation deliberately excludes source names, dataset splits, rewards,
@@ -21,6 +23,12 @@ The structured features describe evidence availability and execution shape. They
 do not decide whether the task succeeded. A learned evaluator remains
 responsible for that decision.
 
+Feature-set v2 defines goal relevance as membership in the explicit
+`GoalRelevant` evidence lane. A failed fact counts as recovered only when a
+later successful fact appears in the same recovery chain. These definitions are
+part of the versioned model-input contract; they must not be changed without a
+new feature-set version.
+
 Repository responsibilities remain separate:
 
 - `traces-to-evals` owns this reusable transformation and its versioned schemas.
@@ -28,4 +36,3 @@ Repository responsibilities remain separate:
   inference, calibration loading, and evidence resolution.
 - Private training systems own label joins, sampling, hard-negative mining,
   fitting, diagnostics, and export.
-

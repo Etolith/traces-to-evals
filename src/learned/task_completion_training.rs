@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -12,7 +12,7 @@ use super::{
 pub const TASK_COMPLETION_EVIDENCE_FEATURE_RECORD_SCHEMA_VERSION: &str =
     "traceeval.task_completion_evidence_feature_record.v1";
 pub const TASK_COMPLETION_STRUCTURED_FEATURE_SET_VERSION: &str =
-    "traceeval.task_completion_structured_evidence.v1";
+    "traceeval.task_completion_structured_evidence.v2";
 pub const TASK_COMPLETION_TRAINING_RECORD_SCHEMA_VERSION: &str =
     "traceeval.task_completion_training_record.v1";
 
@@ -57,6 +57,278 @@ pub const FEATURE_NAMES: [&str; 39] = [
     "requested_side_effect_count_log1p",
     "constraint_count_log1p",
 ];
+
+/// Named task-completion evidence measurements used to construct the stable
+/// v2 model vector.
+///
+/// The struct is the source of truth for feature semantics. Positional model
+/// inputs must be produced through [`Self::as_ordered_vector`] so adding or
+/// reordering a field cannot silently change an exported artifact contract.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TaskCompletionStructuredEvidenceFeaturesV2 {
+    pub included_fact_count_log1p: f64,
+    pub omitted_fact_count_log1p: f64,
+    pub evidence_coverage: f64,
+    pub projected_token_ratio: f64,
+    pub compression_ratio: f64,
+    pub final_response_present: f64,
+    pub recovery_chain_count_log1p: f64,
+    /// Fraction of failed facts followed by a successful fact in the same
+    /// recovery chain. Each failed fact contributes at most once.
+    pub recovered_failure_fraction: f64,
+    pub failed_fact_fraction: f64,
+    pub succeeded_fact_fraction: f64,
+    pub unfinished_fact_fraction: f64,
+    pub verification_succeeded_count_log1p: f64,
+    pub verification_failed_count_log1p: f64,
+    pub verification_missing: f64,
+    pub mutation_succeeded_count_log1p: f64,
+    pub mutation_failed_count_log1p: f64,
+    pub external_succeeded_count_log1p: f64,
+    pub external_failed_count_log1p: f64,
+    pub tool_succeeded_count_log1p: f64,
+    pub tool_failed_count_log1p: f64,
+    pub child_succeeded_count_log1p: f64,
+    pub child_failed_count_log1p: f64,
+    pub unfinished_fact_count_log1p: f64,
+    pub failed_fact_count_log1p: f64,
+    pub succeeded_fact_count_log1p: f64,
+    pub last_fact_failed: f64,
+    pub last_fact_succeeded: f64,
+    pub failure_recency: f64,
+    pub successes_after_last_failure_log1p: f64,
+    pub failures_after_last_success_log1p: f64,
+    pub distinct_tool_count_log1p: f64,
+    pub mandatory_fact_fraction: f64,
+    /// Fraction of facts explicitly selected into the goal-relevant lane.
+    pub goal_relevant_fact_fraction: f64,
+    pub final_response_token_ratio: f64,
+    pub recovery_token_ratio: f64,
+    pub user_amendment_count_log1p: f64,
+    pub requested_verification_count_log1p: f64,
+    pub requested_side_effect_count_log1p: f64,
+    pub constraint_count_log1p: f64,
+}
+
+impl TaskCompletionStructuredEvidenceFeaturesV2 {
+    pub fn from_projection(projection: &CompactTaskCompletionProjectionV1) -> Self {
+        let facts = &projection.facts;
+        let fact_count = facts.len() as f64;
+        let failed = status_count(facts, TraceFactStatusV1::Failed);
+        let succeeded = status_count(facts, TraceFactStatusV1::Succeeded);
+        let unfinished = facts
+            .iter()
+            .filter(|fact| {
+                matches!(
+                    fact.status,
+                    TraceFactStatusV1::Unknown
+                        | TraceFactStatusV1::Running
+                        | TraceFactStatusV1::Cancelled
+                )
+            })
+            .count() as f64;
+        let last = facts.iter().max_by_key(|fact| fact.sequence);
+        let last_failure_sequence = facts
+            .iter()
+            .filter(|fact| fact.status == TraceFactStatusV1::Failed)
+            .map(|fact| fact.sequence)
+            .max();
+        let last_success_sequence = facts
+            .iter()
+            .filter(|fact| fact.status == TraceFactStatusV1::Succeeded)
+            .map(|fact| fact.sequence)
+            .max();
+        let max_sequence = facts.iter().map(|fact| fact.sequence).max().unwrap_or(0);
+        let successes_after_last_failure = last_failure_sequence.map_or(0, |sequence| {
+            facts
+                .iter()
+                .filter(|fact| {
+                    fact.sequence > sequence && fact.status == TraceFactStatusV1::Succeeded
+                })
+                .count()
+        });
+        let failures_after_last_success = last_success_sequence.map_or(0, |sequence| {
+            facts
+                .iter()
+                .filter(|fact| fact.sequence > sequence && fact.status == TraceFactStatusV1::Failed)
+                .count()
+        });
+        let distinct_tools = facts
+            .iter()
+            .filter_map(|fact| fact.tool_name.as_deref())
+            .collect::<BTreeSet<_>>()
+            .len();
+        let mandatory = facts.iter().filter(|fact| fact.mandatory).count() as f64;
+        let goal_relevant = facts
+            .iter()
+            .filter(|fact| fact.lane == super::TaskCompletionEvidenceLaneV1::GoalRelevant)
+            .count() as f64;
+        let recovered_failures = recovered_failure_count(projection) as f64;
+        let included = projection.stats.included_facts as f64;
+        let omitted = projection.stats.omitted_facts as f64;
+        let projected_tokens = projection.token_budget.projected_tokens as f64;
+
+        Self {
+            included_fact_count_log1p: log_count(included as usize),
+            omitted_fact_count_log1p: log_count(omitted as usize),
+            evidence_coverage: ratio(included, included + omitted),
+            projected_token_ratio: ratio(
+                projected_tokens,
+                projection.token_budget.max_input_tokens as f64,
+            ),
+            compression_ratio: ratio(
+                projected_tokens,
+                projection.token_budget.original_tokens as f64,
+            ),
+            final_response_present: binary(facts.iter().any(|fact| {
+                fact.kind == TraceFactKindV1::AssistantMessage
+                    && fact.lane == super::TaskCompletionEvidenceLaneV1::FinalResponse
+            })),
+            recovery_chain_count_log1p: log_count(projection.recovery_chains.len()),
+            recovered_failure_fraction: ratio(recovered_failures, failed),
+            failed_fact_fraction: ratio(failed, fact_count),
+            succeeded_fact_fraction: ratio(succeeded, fact_count),
+            unfinished_fact_fraction: ratio(unfinished, fact_count),
+            verification_succeeded_count_log1p: log_kind_status(
+                facts,
+                TraceFactKindV1::Verification,
+                TraceFactStatusV1::Succeeded,
+            ),
+            verification_failed_count_log1p: log_kind_status(
+                facts,
+                TraceFactKindV1::Verification,
+                TraceFactStatusV1::Failed,
+            ),
+            verification_missing: binary(
+                !facts
+                    .iter()
+                    .any(|fact| fact.kind == TraceFactKindV1::Verification),
+            ),
+            mutation_succeeded_count_log1p: log_kind_status(
+                facts,
+                TraceFactKindV1::ArtifactMutation,
+                TraceFactStatusV1::Succeeded,
+            ),
+            mutation_failed_count_log1p: log_kind_status(
+                facts,
+                TraceFactKindV1::ArtifactMutation,
+                TraceFactStatusV1::Failed,
+            ),
+            external_succeeded_count_log1p: log_kind_status(
+                facts,
+                TraceFactKindV1::ExternalAction,
+                TraceFactStatusV1::Succeeded,
+            ),
+            external_failed_count_log1p: log_kind_status(
+                facts,
+                TraceFactKindV1::ExternalAction,
+                TraceFactStatusV1::Failed,
+            ),
+            tool_succeeded_count_log1p: log_kind_status(
+                facts,
+                TraceFactKindV1::ToolResult,
+                TraceFactStatusV1::Succeeded,
+            ),
+            tool_failed_count_log1p: log_kind_status(
+                facts,
+                TraceFactKindV1::ToolResult,
+                TraceFactStatusV1::Failed,
+            ),
+            child_succeeded_count_log1p: log_kind_status(
+                facts,
+                TraceFactKindV1::ChildAgentResult,
+                TraceFactStatusV1::Succeeded,
+            ),
+            child_failed_count_log1p: log_kind_status(
+                facts,
+                TraceFactKindV1::ChildAgentResult,
+                TraceFactStatusV1::Failed,
+            ),
+            unfinished_fact_count_log1p: log_count(unfinished as usize),
+            failed_fact_count_log1p: log_count(failed as usize),
+            succeeded_fact_count_log1p: log_count(succeeded as usize),
+            last_fact_failed: binary(
+                last.is_some_and(|fact| fact.status == TraceFactStatusV1::Failed),
+            ),
+            last_fact_succeeded: binary(
+                last.is_some_and(|fact| fact.status == TraceFactStatusV1::Succeeded),
+            ),
+            failure_recency: ratio(
+                last_failure_sequence.unwrap_or(0) as f64,
+                max_sequence as f64,
+            ),
+            successes_after_last_failure_log1p: log_count(successes_after_last_failure),
+            failures_after_last_success_log1p: log_count(failures_after_last_success),
+            distinct_tool_count_log1p: log_count(distinct_tools),
+            mandatory_fact_fraction: ratio(mandatory, fact_count),
+            goal_relevant_fact_fraction: ratio(goal_relevant, fact_count),
+            final_response_token_ratio: ratio(
+                projection.token_budget.final_response_tokens as f64,
+                projected_tokens,
+            ),
+            recovery_token_ratio: ratio(
+                projection.token_budget.recovery_tokens as f64,
+                projected_tokens,
+            ),
+            user_amendment_count_log1p: log_count(projection.goal.amendments.len()),
+            requested_verification_count_log1p: log_count(
+                projection.goal.requested_verification.len(),
+            ),
+            requested_side_effect_count_log1p: log_count(
+                projection.goal.requested_side_effects.len(),
+            ),
+            constraint_count_log1p: log_count(projection.goal.constraints.len()),
+        }
+    }
+
+    pub fn names() -> &'static [&'static str; 39] {
+        &FEATURE_NAMES
+    }
+
+    pub fn as_ordered_vector(&self) -> Vec<f64> {
+        vec![
+            self.included_fact_count_log1p,
+            self.omitted_fact_count_log1p,
+            self.evidence_coverage,
+            self.projected_token_ratio,
+            self.compression_ratio,
+            self.final_response_present,
+            self.recovery_chain_count_log1p,
+            self.recovered_failure_fraction,
+            self.failed_fact_fraction,
+            self.succeeded_fact_fraction,
+            self.unfinished_fact_fraction,
+            self.verification_succeeded_count_log1p,
+            self.verification_failed_count_log1p,
+            self.verification_missing,
+            self.mutation_succeeded_count_log1p,
+            self.mutation_failed_count_log1p,
+            self.external_succeeded_count_log1p,
+            self.external_failed_count_log1p,
+            self.tool_succeeded_count_log1p,
+            self.tool_failed_count_log1p,
+            self.child_succeeded_count_log1p,
+            self.child_failed_count_log1p,
+            self.unfinished_fact_count_log1p,
+            self.failed_fact_count_log1p,
+            self.succeeded_fact_count_log1p,
+            self.last_fact_failed,
+            self.last_fact_succeeded,
+            self.failure_recency,
+            self.successes_after_last_failure_log1p,
+            self.failures_after_last_success_log1p,
+            self.distinct_tool_count_log1p,
+            self.mandatory_fact_fraction,
+            self.goal_relevant_fact_fraction,
+            self.final_response_token_ratio,
+            self.recovery_token_ratio,
+            self.user_amendment_count_log1p,
+            self.requested_verification_count_log1p,
+            self.requested_side_effect_count_log1p,
+            self.constraint_count_log1p,
+        ]
+    }
+}
 
 /// Label-free, revision-bound measurements of projected trace evidence.
 ///
@@ -246,162 +518,37 @@ fn training_record_id(
 }
 
 fn extract_values(projection: &CompactTaskCompletionProjectionV1) -> Vec<f64> {
-    let facts = &projection.facts;
-    let fact_count = facts.len() as f64;
-    let failed = status_count(facts, TraceFactStatusV1::Failed);
-    let succeeded = status_count(facts, TraceFactStatusV1::Succeeded);
-    let unfinished = facts
-        .iter()
-        .filter(|fact| {
-            matches!(
-                fact.status,
-                TraceFactStatusV1::Unknown
-                    | TraceFactStatusV1::Running
-                    | TraceFactStatusV1::Cancelled
-            )
-        })
-        .count() as f64;
-    let last = facts.iter().max_by_key(|fact| fact.sequence);
-    let last_failure_sequence = facts
-        .iter()
-        .filter(|fact| fact.status == TraceFactStatusV1::Failed)
-        .map(|fact| fact.sequence)
-        .max();
-    let last_success_sequence = facts
-        .iter()
-        .filter(|fact| fact.status == TraceFactStatusV1::Succeeded)
-        .map(|fact| fact.sequence)
-        .max();
-    let max_sequence = facts.iter().map(|fact| fact.sequence).max().unwrap_or(0);
-    let successes_after_last_failure = last_failure_sequence.map_or(0, |sequence| {
-        facts
-            .iter()
-            .filter(|fact| fact.sequence > sequence && fact.status == TraceFactStatusV1::Succeeded)
-            .count()
-    });
-    let failures_after_last_success = last_success_sequence.map_or(0, |sequence| {
-        facts
-            .iter()
-            .filter(|fact| fact.sequence > sequence && fact.status == TraceFactStatusV1::Failed)
-            .count()
-    });
-    let distinct_tools = facts
-        .iter()
-        .filter_map(|fact| fact.tool_name.as_deref())
-        .collect::<BTreeSet<_>>()
-        .len();
-    let mandatory = facts.iter().filter(|fact| fact.mandatory).count() as f64;
-    let goal_relevant = facts.iter().filter(|fact| !fact.mandatory).count() as f64;
-    let included = projection.stats.included_facts as f64;
-    let omitted = projection.stats.omitted_facts as f64;
-    let projected_tokens = projection.token_budget.projected_tokens as f64;
+    TaskCompletionStructuredEvidenceFeaturesV2::from_projection(projection).as_ordered_vector()
+}
 
-    vec![
-        log_count(included as usize),
-        log_count(omitted as usize),
-        ratio(included, included + omitted),
-        ratio(
-            projected_tokens,
-            projection.token_budget.max_input_tokens as f64,
-        ),
-        ratio(
-            projected_tokens,
-            projection.token_budget.original_tokens as f64,
-        ),
-        binary(facts.iter().any(|fact| {
-            fact.kind == TraceFactKindV1::AssistantMessage
-                && matches!(
-                    fact.lane,
-                    super::TaskCompletionEvidenceLaneV1::FinalResponse
-                )
-        })),
-        log_count(projection.recovery_chains.len()),
-        ratio(projection.recovery_chains.len() as f64, failed),
-        ratio(failed, fact_count),
-        ratio(succeeded, fact_count),
-        ratio(unfinished, fact_count),
-        log_kind_status(
-            facts,
-            TraceFactKindV1::Verification,
-            TraceFactStatusV1::Succeeded,
-        ),
-        log_kind_status(
-            facts,
-            TraceFactKindV1::Verification,
-            TraceFactStatusV1::Failed,
-        ),
-        binary(
-            !facts
-                .iter()
-                .any(|fact| fact.kind == TraceFactKindV1::Verification),
-        ),
-        log_kind_status(
-            facts,
-            TraceFactKindV1::ArtifactMutation,
-            TraceFactStatusV1::Succeeded,
-        ),
-        log_kind_status(
-            facts,
-            TraceFactKindV1::ArtifactMutation,
-            TraceFactStatusV1::Failed,
-        ),
-        log_kind_status(
-            facts,
-            TraceFactKindV1::ExternalAction,
-            TraceFactStatusV1::Succeeded,
-        ),
-        log_kind_status(
-            facts,
-            TraceFactKindV1::ExternalAction,
-            TraceFactStatusV1::Failed,
-        ),
-        log_kind_status(
-            facts,
-            TraceFactKindV1::ToolResult,
-            TraceFactStatusV1::Succeeded,
-        ),
-        log_kind_status(
-            facts,
-            TraceFactKindV1::ToolResult,
-            TraceFactStatusV1::Failed,
-        ),
-        log_kind_status(
-            facts,
-            TraceFactKindV1::ChildAgentResult,
-            TraceFactStatusV1::Succeeded,
-        ),
-        log_kind_status(
-            facts,
-            TraceFactKindV1::ChildAgentResult,
-            TraceFactStatusV1::Failed,
-        ),
-        log_count(unfinished as usize),
-        log_count(failed as usize),
-        log_count(succeeded as usize),
-        binary(last.is_some_and(|fact| fact.status == TraceFactStatusV1::Failed)),
-        binary(last.is_some_and(|fact| fact.status == TraceFactStatusV1::Succeeded)),
-        ratio(
-            last_failure_sequence.unwrap_or(0) as f64,
-            max_sequence as f64,
-        ),
-        log_count(successes_after_last_failure),
-        log_count(failures_after_last_success),
-        log_count(distinct_tools),
-        ratio(mandatory, fact_count),
-        ratio(goal_relevant, fact_count),
-        ratio(
-            projection.token_budget.final_response_tokens as f64,
-            projected_tokens,
-        ),
-        ratio(
-            projection.token_budget.recovery_tokens as f64,
-            projected_tokens,
-        ),
-        log_count(projection.goal.amendments.len()),
-        log_count(projection.goal.requested_verification.len()),
-        log_count(projection.goal.requested_side_effects.len()),
-        log_count(projection.goal.constraints.len()),
-    ]
+fn recovered_failure_count(projection: &CompactTaskCompletionProjectionV1) -> usize {
+    let facts_by_id = projection
+        .facts
+        .iter()
+        .map(|fact| (fact.evidence_id.as_str(), fact))
+        .collect::<BTreeMap<_, _>>();
+    let mut recovered = BTreeSet::new();
+
+    for chain in &projection.recovery_chains {
+        let chain_facts = chain
+            .evidence_ids
+            .iter()
+            .filter_map(|evidence_id| facts_by_id.get(evidence_id.as_str()).copied())
+            .collect::<Vec<_>>();
+        for failed_fact in chain_facts
+            .iter()
+            .filter(|fact| fact.status == TraceFactStatusV1::Failed)
+        {
+            if chain_facts.iter().any(|later_fact| {
+                later_fact.sequence > failed_fact.sequence
+                    && later_fact.status == TraceFactStatusV1::Succeeded
+            }) {
+                recovered.insert(failed_fact.evidence_id.as_str());
+            }
+        }
+    }
+
+    recovered.len()
 }
 
 fn status_count(facts: &[TaskCompletionTraceFactV1], status: TraceFactStatusV1) -> f64 {
@@ -614,6 +761,109 @@ mod tests {
             FEATURE_NAMES.iter().copied().collect::<BTreeSet<_>>().len(),
             FEATURE_NAMES.len()
         );
+        assert_eq!(
+            TaskCompletionStructuredEvidenceFeaturesV2::names(),
+            &FEATURE_NAMES
+        );
+        assert_eq!(
+            TASK_COMPLETION_STRUCTURED_FEATURE_SET_VERSION,
+            "traceeval.task_completion_structured_evidence.v2"
+        );
+    }
+
+    #[test]
+    fn typed_features_count_only_the_goal_relevant_lane() {
+        let mut projection = projection();
+        projection.facts.push(TaskCompletionTraceFactV1 {
+            evidence_id: "E0002".into(),
+            evidence_key: "final-response".into(),
+            sequence: 2,
+            actor: TraceFactActorV1::Assistant,
+            kind: TraceFactKindV1::AssistantMessage,
+            status: TraceFactStatusV1::Succeeded,
+            lane: TaskCompletionEvidenceLaneV1::FinalResponse,
+            mandatory: false,
+            span_id: Some("span-2".into()),
+            parent_span_id: None,
+            tool_name: None,
+            summary: "The task is complete.".into(),
+            structured_facts: BTreeMap::new(),
+            token_count: 5,
+        });
+        projection.facts.push(TaskCompletionTraceFactV1 {
+            evidence_id: "E0003".into(),
+            evidence_key: "relevant-detail".into(),
+            sequence: 3,
+            actor: TraceFactActorV1::Tool,
+            kind: TraceFactKindV1::ToolResult,
+            status: TraceFactStatusV1::Succeeded,
+            lane: TaskCompletionEvidenceLaneV1::GoalRelevant,
+            mandatory: false,
+            span_id: Some("span-3".into()),
+            parent_span_id: None,
+            tool_name: Some("terminal".into()),
+            summary: "Relevant supporting evidence.".into(),
+            structured_facts: BTreeMap::new(),
+            token_count: 5,
+        });
+
+        let features = TaskCompletionStructuredEvidenceFeaturesV2::from_projection(&projection);
+
+        assert_eq!(features.goal_relevant_fact_fraction, 1.0 / 3.0);
+        assert_eq!(features.final_response_present, 1.0);
+        assert_eq!(features.as_ordered_vector().len(), FEATURE_NAMES.len());
+    }
+
+    #[test]
+    fn recovered_failure_fraction_requires_a_later_success_in_the_same_chain() {
+        let mut projection = projection();
+        projection.facts.extend([
+            TaskCompletionTraceFactV1 {
+                evidence_id: "E0002".into(),
+                evidence_key: "failed-attempt".into(),
+                sequence: 2,
+                actor: TraceFactActorV1::Tool,
+                kind: TraceFactKindV1::Verification,
+                status: TraceFactStatusV1::Failed,
+                lane: TaskCompletionEvidenceLaneV1::FailureRecovery,
+                mandatory: false,
+                span_id: Some("span-2".into()),
+                parent_span_id: None,
+                tool_name: Some("terminal".into()),
+                summary: "Tests failed.".into(),
+                structured_facts: BTreeMap::new(),
+                token_count: 3,
+            },
+            TaskCompletionTraceFactV1 {
+                evidence_id: "E0003".into(),
+                evidence_key: "successful-retry".into(),
+                sequence: 3,
+                actor: TraceFactActorV1::Tool,
+                kind: TraceFactKindV1::Verification,
+                status: TraceFactStatusV1::Succeeded,
+                lane: TaskCompletionEvidenceLaneV1::FailureRecovery,
+                mandatory: false,
+                span_id: Some("span-3".into()),
+                parent_span_id: None,
+                tool_name: Some("terminal".into()),
+                summary: "Tests passed.".into(),
+                structured_facts: BTreeMap::new(),
+                token_count: 3,
+            },
+        ]);
+        projection.recovery_chains = vec![TaskCompletionRecoveryChainV1 {
+            chain_id: "test-retry".into(),
+            evidence_ids: vec!["E0002".into(), "E0003".into()],
+            token_count: 6,
+        }];
+
+        let features = TaskCompletionStructuredEvidenceFeaturesV2::from_projection(&projection);
+
+        assert_eq!(features.recovered_failure_fraction, 1.0);
+
+        projection.facts[2].status = TraceFactStatusV1::Failed;
+        let features = TaskCompletionStructuredEvidenceFeaturesV2::from_projection(&projection);
+        assert_eq!(features.recovered_failure_fraction, 0.0);
     }
 
     #[test]
