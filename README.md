@@ -567,7 +567,7 @@ Library APIs return `traces_to_evals::Result<T>` with `TraceEvalError` variants 
 
 ## Planned Work
 
-See [docs/api-and-product-roadmap.md](docs/api-and-product-roadmap.md) for API/product cleanup, [docs/missing.md](docs/missing.md) for remaining work, [docs/scoring-design.md](docs/scoring-design.md) for scoring and calibration design, [docs/cluster-discovery.md](docs/cluster-discovery.md) for the cluster discovery, embedding, and LLM labeling spec, and [docs/vector-index.md](docs/vector-index.md) for the proposed vector index trait and Paimon backend.
+See [docs/api-and-product-roadmap.md](docs/api-and-product-roadmap.md) for API/product cleanup, [docs/missing.md](docs/missing.md) for remaining work, [docs/scoring-design.md](docs/scoring-design.md) for scoring and calibration design, [docs/cluster-discovery.md](docs/cluster-discovery.md) for the cluster discovery, embedding, and LLM labeling spec, [docs/task-completion-training-records.md](docs/task-completion-training-records.md) for the label-free trace-to-training-record boundary, and [docs/vector-index.md](docs/vector-index.md) for the proposed vector index trait and Paimon backend.
 
 Near-term implementation priorities:
 

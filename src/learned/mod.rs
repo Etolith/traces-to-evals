@@ -7,6 +7,7 @@ mod evaluation;
 mod evaluator;
 mod provider;
 mod task_completion;
+mod task_completion_training;
 mod taxonomy;
 
 pub use agreement::{AgreementLabelScaleV1, AgreementRatingV1, HumanAgreementReportV1};
@@ -66,6 +67,12 @@ pub use task_completion::{
     TaskCompletionOutcomeV1, TaskCompletionProjectionV1, TaskCompletionProjectorV1,
     TaskCompletionToolObservationV1, TaskCompletionTraceObservationV1,
     task_completion_judgment_response_schema,
+};
+pub use task_completion_training::{
+    FEATURE_NAMES as TASK_COMPLETION_STRUCTURED_FEATURE_NAMES,
+    TASK_COMPLETION_EVIDENCE_FEATURE_RECORD_SCHEMA_VERSION,
+    TASK_COMPLETION_STRUCTURED_FEATURE_SET_VERSION, TASK_COMPLETION_TRAINING_RECORD_SCHEMA_VERSION,
+    TaskCompletionEvidenceFeatureRecordV1, TaskCompletionTrainingRecordV1,
 };
 pub use taxonomy::{
     AGENT_TAXONOMY_RELEASE_SCHEMA_VERSION, AgentTaxonomyReleaseV1, TaxonomyAssignmentSourceV1,
