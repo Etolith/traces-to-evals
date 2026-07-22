@@ -18,6 +18,7 @@ pub mod project;
 #[doc(hidden)]
 pub mod providers;
 pub mod report;
+pub mod semantic;
 pub mod validation;
 
 pub use behavior::{
@@ -163,6 +164,10 @@ pub use providers::chat::{ChatClient, ChatRequest, ResponseSchema};
 pub use providers::openai_dive::chat::OpenAiChatClient;
 pub use report::{
     CalibrationImpact, ClusterIssue, ClusterScore, EvaluationReport, EvaluatorScore, FailedCase,
+};
+pub use semantic::{
+    OPENINFERENCE_SPAN_KIND_ATTRIBUTE, is_known_semantic_attribute_key, resolved_span_kind,
+    semantic_span_kind,
 };
 pub use validation::{ValidationIssue, ValidationProfile, ValidationReport, ValidationSeverity};
 
