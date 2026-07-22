@@ -180,6 +180,8 @@ impl TaskCompletionTrainingRecordV1 {
         projection: &CompactTaskCompletionProjectionV1,
     ) -> Result<(), ContractError> {
         projection.validate()?;
+        let expected_structured_features =
+            TaskCompletionEvidenceFeatureRecordV1::from_projection(projection)?;
         self.structured_features.validate()?;
         if self.schema_version != TASK_COMPLETION_TRAINING_RECORD_SCHEMA_VERSION {
             return Err(training_error(
@@ -207,6 +209,11 @@ impl TaskCompletionTrainingRecordV1 {
         {
             return Err(training_error(
                 "structured feature record does not match its training record",
+            ));
+        }
+        if self.structured_features != expected_structured_features {
+            return Err(training_error(
+                "structured feature record does not match its sealed projection",
             ));
         }
         if self.training_record_id != training_record_id(projection, &self.structured_features)? {
@@ -657,6 +664,30 @@ mod tests {
         assert!(serialized.get("reward").is_none());
 
         record.facts[0].summary = "tampered".into();
+        assert!(record.validate_against(&projection).is_err());
+    }
+
+    #[test]
+    fn training_record_validation_rejects_tampered_structured_features() {
+        let projection = projection();
+        let mut record = TaskCompletionTrainingRecordV1::from_projection(&projection).unwrap();
+        record.structured_features.feature_values[0] += 1.0;
+        record.structured_features.feature_record_id = canonical_content_id(
+            TASK_COMPLETION_EVIDENCE_FEATURE_RECORD_SCHEMA_VERSION,
+            &json!({
+                "feature_set_version": record.structured_features.feature_set_version,
+                "target_key": record.structured_features.target_key,
+                "target_revision": record.structured_features.target_revision,
+                "trace_context_binding_id": record.structured_features.trace_context_binding_id,
+                "projection_hash": record.structured_features.projection_hash,
+                "projector_version": record.structured_features.projector_version,
+                "feature_names": record.structured_features.feature_names,
+                "feature_values": record.structured_features.feature_values,
+            }),
+        )
+        .unwrap();
+        record.training_record_id = training_record_id(&projection, &record.structured_features).unwrap();
+
         assert!(record.validate_against(&projection).is_err());
     }
 }
