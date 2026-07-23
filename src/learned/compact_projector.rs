@@ -556,12 +556,13 @@ fn fact_status(status: SourceSpanStatus, error_present: bool) -> TraceFactStatus
 
 fn recovery_chains(candidates: &[CandidateFact]) -> Vec<TaskCompletionRecoveryChainV1> {
     let mut output = Vec::new();
-    for failure in candidates
-        .iter()
-        .filter(|candidate| candidate.fact.status == TraceFactStatusV1::Failed)
-    {
+    for failure in candidates.iter().filter(|candidate| {
+        candidate.fact.actor == TraceFactActorV1::Tool
+            && candidate.fact.status == TraceFactStatusV1::Failed
+    }) {
         if let Some(recovery) = candidates.iter().find(|candidate| {
-            candidate.fact.sequence > failure.fact.sequence
+            candidate.fact.actor == TraceFactActorV1::Tool
+                && candidate.fact.sequence > failure.fact.sequence
                 && candidate.family == failure.family
                 && candidate.fact.status == TraceFactStatusV1::Succeeded
         }) {
@@ -953,18 +954,26 @@ mod tests {
         recovered.start_time_unix_nano = Some(4);
         recovered.end_time_unix_nano = Some(5);
 
+        let mut unrelated_failed = Span::new("trace-failure", "trace").with_kind(SpanKind::Tool);
+        unrelated_failed.parent_id = Some("root".into());
+        unrelated_failed.output = Some("trace tool failed".into());
+        unrelated_failed.source_status = SourceSpanStatus::Error;
+        unrelated_failed.start_time_unix_nano = Some(6);
+        unrelated_failed.end_time_unix_nano = Some(7);
+
         let mut trace = Trace::new("trace-1")
             .with_span(root)
             .with_span(failed)
-            .with_span(recovered);
+            .with_span(recovered)
+            .with_span(unrelated_failed);
         for index in 0..optional_tools {
             let mut observation =
                 Span::new(format!("observe-{index}"), "observe").with_kind(SpanKind::Tool);
             observation.parent_id = Some("root".into());
             observation.output = Some(format!("observation number {index}"));
             observation.source_status = SourceSpanStatus::Ok;
-            observation.start_time_unix_nano = Some(6 + index as u64);
-            observation.end_time_unix_nano = Some(7 + index as u64);
+            observation.start_time_unix_nano = Some(8 + index as u64);
+            observation.end_time_unix_nano = Some(9 + index as u64);
             trace = trace.with_span(observation);
         }
         TaskCompletionProjectorV1 {
