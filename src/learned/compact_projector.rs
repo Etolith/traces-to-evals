@@ -810,8 +810,13 @@ fn reconcile_section_counts(counts: &mut [u32; 7], projected_tokens: u32) {
     }
 
     let mut excess = total - target;
-    for count in counts.iter_mut().rev() {
-        let reduction = u64::from(*count).min(excess);
+    for (index, count) in counts.iter_mut().enumerate().rev() {
+        // The goal bundle contract requires a positive token count. Combined
+        // tokenization can be much smaller than the sum of independently
+        // tokenized tagged sections, so reconciliation must never consume the
+        // final goal token while removing that boundary overhead.
+        let minimum = u32::from(index == 1);
+        let reduction = u64::from(count.saturating_sub(minimum)).min(excess);
         *count -= u32::try_from(reduction).unwrap_or(*count);
         excess -= reduction;
         if excess == 0 {
@@ -858,6 +863,16 @@ mod tests {
         TRACE_CONTEXT_BINDING_SCHEMA_VERSION, TraceContextBindingProvenanceV1,
         TraceContextBindingResolutionV1, TraceContextBindingV1,
     };
+
+    #[test]
+    fn section_reconciliation_preserves_a_positive_goal_count() {
+        let mut counts = [100, 3, 100, 100, 100, 100, 100];
+
+        reconcile_section_counts(&mut counts, 2);
+
+        assert_eq!(counts.iter().sum::<u32>(), 2);
+        assert_eq!(counts[1], 1);
+    }
 
     use crate::learned::{TaskCompletionContentPolicyV1, TaskCompletionProjectorV1};
     use crate::model::{Span, SpanKind, Trace};

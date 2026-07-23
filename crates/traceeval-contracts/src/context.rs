@@ -704,15 +704,31 @@ fn contains_forbidden_scalar(value: &str) -> bool {
                     .collect::<String>(),
             )
     }) || contains_credential_assignment(value)
-        || value.contains("sk-")
-        || value.contains("ghp_")
-        || value.contains("github_pat_")
-        || value.contains("xoxb-")
-        || value.contains("xoxp-")
+        || contains_secret_prefix(value, "sk-")
+        || contains_secret_prefix(value, "ghp_")
+        || contains_secret_prefix(value, "github_pat_")
+        || contains_secret_prefix(value, "xoxb-")
+        || contains_secret_prefix(value, "xoxp-")
         || value.to_ascii_lowercase().contains("bearer ")
         || value.contains("BEGIN PRIVATE KEY")
         || value.contains("BEGIN OPENSSH PRIVATE KEY")
         || decoded_value_is_forbidden(value)
+}
+
+fn contains_secret_prefix(value: &str, prefix: &str) -> bool {
+    value.match_indices(prefix).any(|(index, _)| {
+        let has_token_boundary = value[..index]
+            .chars()
+            .next_back()
+            .is_none_or(|character| !character.is_ascii_alphanumeric());
+        let suffix_length = value[index + prefix.len()..]
+            .chars()
+            .take_while(|character| {
+                character.is_ascii_alphanumeric() || matches!(character, '_' | '-')
+            })
+            .count();
+        has_token_boundary && suffix_length >= 8
+    })
 }
 
 fn contains_credential_assignment(value: &str) -> bool {
@@ -774,9 +790,9 @@ fn decoded_value_is_forbidden(value: &str) -> bool {
                         .collect::<String>(),
                 )
         }) || contains_credential_assignment(&decoded)
-            || decoded.contains("sk-")
-            || decoded.contains("ghp_")
-            || decoded.contains("github_pat_")
+            || contains_secret_prefix(&decoded, "sk-")
+            || contains_secret_prefix(&decoded, "ghp_")
+            || contains_secret_prefix(&decoded, "github_pat_")
             || decoded.to_ascii_lowercase().contains("bearer ")
             || decoded.contains("PRIVATE KEY")
     })
@@ -799,4 +815,17 @@ fn context_serialization_error(error: serde_json::Error) -> ContractError {
 
 fn context_error(message: impl Into<String>) -> ContractError {
     ContractError::InvalidContext(message.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ordinary_source_locator_is_not_treated_as_sensitive_material() {
+        assert!(!contains_forbidden_scalar(
+            "Perseval task-completion safety default"
+        ));
+        assert!(contains_forbidden_scalar("credential: sk-abcdefgh12345678"));
+    }
 }
