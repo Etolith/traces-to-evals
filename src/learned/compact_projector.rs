@@ -29,15 +29,16 @@ pub enum CompactTaskCompletionProjectorError {
     #[error("tokenization failed: {0}")]
     Tokenization(String),
     #[error(
-        "mandatory evidence requires {required_tokens} tokens, above the {maximum_tokens}-token limit"
+        "the mandatory-evidence projection requires {required_tokens} total tokens, above the \
+         {maximum_tokens}-token limit"
     )]
     MandatoryEvidenceExceedsBudget {
         required_tokens: u32,
         maximum_tokens: u32,
     },
     #[error(
-        "mandatory and recovery evidence requires {required_tokens} tokens, above the \
-         {maximum_tokens}-token limit"
+        "the mandatory-and-recovery projection requires {required_tokens} total tokens, above \
+         the {maximum_tokens}-token limit"
     )]
     ProtectedEvidenceExceedsBudget {
         required_tokens: u32,
