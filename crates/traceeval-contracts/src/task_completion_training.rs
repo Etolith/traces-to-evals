@@ -655,7 +655,7 @@ mod tests {
     use super::*;
     use std::collections::{BTreeMap, BTreeSet};
 
-    use crate::learned::{
+    use crate::{
         COMPACT_TASK_COMPLETION_PROJECTION_SCHEMA_VERSION, CompactTaskCompletionProjectionStatsV1,
         CompactTaskCompletionTokenBudgetV1, CompactTaskCompletionVariantV1,
         EvaluationEvidenceCatalogV1, EvaluationEvidenceKindV1, EvaluationEvidenceLocationV1,

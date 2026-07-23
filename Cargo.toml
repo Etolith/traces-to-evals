@@ -7,6 +7,10 @@ description = "Turn agent execution traces into evidence-backed failure findings
 repository = "https://github.com/Etolith/traces-to-evals"
 license = "GPL-3.0-or-later"
 
+[workspace]
+members = ["crates/traceeval-contracts"]
+resolver = "2"
+
 [lib]
 name = "traces_to_evals"
 path = "src/lib.rs"
@@ -43,6 +47,8 @@ serde_json_canonicalizer = "0.3.2"
 sha2 = "0.10"
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"], optional = true }
+# Keep the version for publish-time semver validation and the path for workspace development.
+traceeval-contracts = { version = "0.1.0", path = "crates/traceeval-contracts" }
 
 [dev-dependencies]
 futures = "0.3"

@@ -712,7 +712,7 @@ mod tests {
             .map(|fact| {
                 (
                     fact.evidence_key.clone(),
-                    crate::learned::EvaluationEvidenceRecordV1 {
+                    crate::EvaluationEvidenceRecordV1 {
                         target_key: "trace-1".into(),
                         target_revision: "revision-1".into(),
                         projection_hash: placeholder.clone(),
