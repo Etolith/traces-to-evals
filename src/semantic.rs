@@ -18,6 +18,10 @@ const SEMANTIC_SPAN_KINDS: &[(&str, SpanKind)] = &[
     ("prompt", SpanKind::Prompt),
 ];
 
+// This registry contains bounded labels, identifiers, statuses, booleans, and
+// numeric measurements. Parser keys that can carry free-form payloads (for
+// example input/output values, state deltas, arguments, results, and error
+// messages) remain excluded even when a normalizer can consume them.
 const KNOWN_SEMANTIC_ATTRIBUTE_KEYS: &[&str] = &[
     OPENINFERENCE_SPAN_KIND_ATTRIBUTE,
     "gen_ai.operation.name",
@@ -32,6 +36,10 @@ const KNOWN_SEMANTIC_ATTRIBUTE_KEYS: &[&str] = &[
     "agent.tool.status",
     "agent.approval.required",
     "agent.approval.outcome",
+    "approval.required",
+    "approval_required",
+    "approval.outcome",
+    "approval_outcome",
     "agent.state.observation",
     "agent.state.predicate",
     "agent.state.artifact.id",
@@ -51,12 +59,19 @@ const KNOWN_SEMANTIC_ATTRIBUTE_KEYS: &[&str] = &[
     "agent.policy.outcome",
     "agent.policy.reason_code",
     "tool.name",
+    "tool_name",
     "tool.call.id",
     "tool_call_id",
+    "call_id",
+    "tool.attempt",
+    "attempt",
     "tool.status",
     "tool.result.success",
+    "tool_result.success",
+    "gen_ai.tool.result.success",
     "tool.timeout",
     "tool.cancelled",
+    "execution.cancelled",
     "tool.operation",
     "tool.effect",
     "tool.retry_safety",
@@ -66,6 +81,9 @@ const KNOWN_SEMANTIC_ATTRIBUTE_KEYS: &[&str] = &[
     "tool.state.observation",
     "tool.state.predicate",
     "tool.state.artifact.id",
+    "state.observation",
+    "state.predicate",
+    "state.artifact.id",
     "operation",
     "operation.name",
     "operation.effect",
@@ -96,6 +114,7 @@ const KNOWN_SEMANTIC_ATTRIBUTE_KEYS: &[&str] = &[
     "result.ok",
     "policy.id",
     "policy.version",
+    "policy_version",
     "policy.decision.id",
     "policy.decision.outcome",
     "policy.action",
@@ -151,8 +170,14 @@ mod tests {
     #[test]
     fn semantic_registry_excludes_payload_content() {
         assert!(is_known_semantic_attribute_key("tool.result.success"));
+        assert!(is_known_semantic_attribute_key("tool_result.success"));
+        assert!(is_known_semantic_attribute_key("approval_required"));
+        assert!(is_known_semantic_attribute_key("approval.outcome"));
+        assert!(is_known_semantic_attribute_key("tool_name"));
         assert!(is_known_semantic_attribute_key("TOOL.RESULT.SUCCESS"));
         assert!(!is_known_semantic_attribute_key("input.value"));
         assert!(!is_known_semantic_attribute_key("output.value"));
+        assert!(!is_known_semantic_attribute_key("state_delta"));
+        assert!(!is_known_semantic_attribute_key("exception.message"));
     }
 }
