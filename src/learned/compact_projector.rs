@@ -310,7 +310,10 @@ fn normalize_candidates(
 ) -> Result<Vec<CandidateFact>, ContractError> {
     let mut output = Vec::new();
     if let Some(summary) = source.trace.input_summary.as_deref() {
-        if let Some((key, record)) = trace_segment(source, EvaluationEvidenceKindV1::InputSegment) {
+        // Trace-level input is projected from the terminal span. Unlike tool inputs,
+        // TaskCompletionProjectorV1 deliberately binds it to that span rather than
+        // creating a separate InputSegment evidence record.
+        if let Some((key, record)) = trace_segment(source, EvaluationEvidenceKindV1::Span) {
             output.push(candidate(
                 key,
                 record,
@@ -906,6 +909,19 @@ mod tests {
                 .facts
                 .iter()
                 .any(|fact| fact.lane == TaskCompletionEvidenceLaneV1::FinalResponse)
+        );
+        let user_request = projection
+            .facts
+            .iter()
+            .find(|fact| fact.kind == TraceFactKindV1::UserRequest)
+            .expect("trace input should produce a user-request fact");
+        assert_eq!(
+            projection
+                .evidence_catalog
+                .entries
+                .get(&user_request.evidence_key)
+                .map(|record| record.evidence_kind),
+            Some(EvaluationEvidenceKindV1::Span)
         );
         assert!(projection.facts.iter().all(|fact| {
             projection
