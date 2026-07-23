@@ -34,21 +34,7 @@ pub(super) fn span_output(span: &Span) -> Option<(&Span, String)> {
 }
 
 pub(super) fn span_kind(span: &Span) -> SpanKind {
-    if span.kind != SpanKind::Other {
-        return span.kind;
-    }
-    match string_attribute(span, &["openinference.span.kind"])
-        .unwrap_or_default()
-        .to_ascii_uppercase()
-        .as_str()
-    {
-        "LLM" => SpanKind::Llm,
-        "AGENT" => SpanKind::Agent,
-        "TOOL" => SpanKind::Tool,
-        "CHAIN" => SpanKind::Chain,
-        "GUARDRAIL" => SpanKind::Guardrail,
-        _ => SpanKind::Other,
-    }
+    crate::resolved_span_kind(span)
 }
 
 pub(super) fn tool_name(span: &Span) -> (String, FactQuality) {

@@ -1565,12 +1565,7 @@ fn project_capability(capability: &AgentCapabilityV1) -> TaskCompletionCapabilit
 }
 
 fn is_tool_span(span: &Span) -> bool {
-    span.kind == SpanKind::Tool
-        || span
-            .attributes
-            .get("openinference.span.kind")
-            .and_then(Value::as_str)
-            .is_some_and(|kind| kind.eq_ignore_ascii_case("tool"))
+    crate::resolved_span_kind(span) == SpanKind::Tool
 }
 
 fn bound_utf8(value: &str, max_bytes: u32) -> String {

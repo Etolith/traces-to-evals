@@ -17,7 +17,7 @@ impl OpenInferenceExtractor {
     }
 
     pub fn span_kind_from_attribute(value: &str) -> SpanKind {
-        openinference_span_kind(value)
+        crate::semantic_span_kind(value)
     }
 }
 
@@ -124,14 +124,7 @@ fn span_output(span: &Span) -> Option<String> {
 }
 
 fn span_kind(span: &Span) -> SpanKind {
-    if span.kind != SpanKind::Other {
-        return span.kind;
-    }
-
-    string_attribute(span, "openinference.span.kind")
-        .as_deref()
-        .map(openinference_span_kind)
-        .unwrap_or(SpanKind::Other)
+    crate::resolved_span_kind(span)
 }
 
 fn string_attribute(span: &Span, key: &str) -> Option<String> {
@@ -172,22 +165,6 @@ fn tool_call_context(span: &Span) -> Value {
     );
 
     Value::Object(context)
-}
-
-fn openinference_span_kind(value: &str) -> SpanKind {
-    match value.to_ascii_uppercase().as_str() {
-        "LLM" => SpanKind::Llm,
-        "AGENT" => SpanKind::Agent,
-        "TOOL" => SpanKind::Tool,
-        "CHAIN" => SpanKind::Chain,
-        "RETRIEVER" => SpanKind::Retriever,
-        "RERANKER" => SpanKind::Reranker,
-        "EMBEDDING" => SpanKind::Embedding,
-        "GUARDRAIL" => SpanKind::Guardrail,
-        "EVALUATOR" => SpanKind::Evaluator,
-        "PROMPT" => SpanKind::Prompt,
-        _ => SpanKind::Other,
-    }
 }
 
 #[cfg(test)]
