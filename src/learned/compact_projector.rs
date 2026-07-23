@@ -275,14 +275,14 @@ impl CompactTaskCompletionProjector {
             },
         };
         let sections = render_sections(&projection, &self.rubric, original_fact_count);
-        let section_tokens = cumulative_section_counts(tokenizer, &sections)?;
+        let (section_tokens, projected_tokens) = section_token_counts(tokenizer, &sections)?;
         goal.token_count = section_tokens[1];
         projection.goal = goal;
         projection.token_budget = CompactTaskCompletionTokenBudgetV1 {
             tokenizer_id: tokenizer.tokenizer_id().into(),
             max_input_tokens: self.max_input_tokens,
             original_tokens,
-            projected_tokens: section_tokens.iter().sum(),
+            projected_tokens,
             rubric_tokens: section_tokens[0],
             goal_tokens: section_tokens[1],
             final_response_tokens: section_tokens[2],
@@ -400,11 +400,33 @@ fn normalize_candidates(
         }
     }
 
-    output.sort_by_key(|candidate| candidate.fact.sequence);
+    output.sort_by(|left, right| {
+        left.fact
+            .sequence
+            .cmp(&right.fact.sequence)
+            .then_with(|| actor_order(left.fact.actor).cmp(&actor_order(right.fact.actor)))
+            .then_with(|| left.fact.evidence_key.cmp(&right.fact.evidence_key))
+    });
     for (index, candidate) in output.iter_mut().enumerate() {
+        candidate.fact.sequence = u32::try_from(index).map_err(|_| {
+            ContractError::InvalidTaskCompletion(
+                "compact projection contains too many facts to sequence".into(),
+            )
+        })?;
         candidate.fact.evidence_id = format!("E{:04}", index + 1);
     }
     Ok(output)
+}
+
+fn actor_order(actor: TraceFactActorV1) -> u8 {
+    match actor {
+        TraceFactActorV1::User => 0,
+        TraceFactActorV1::Assistant => 1,
+        TraceFactActorV1::Tool => 2,
+        TraceFactActorV1::System => 3,
+        TraceFactActorV1::ChildAgent => 4,
+        TraceFactActorV1::External => 5,
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -716,20 +738,36 @@ fn render_sections(
     ]
 }
 
-fn cumulative_section_counts<C: TaskCompletionTokenCounter>(
+fn section_token_counts<C: TaskCompletionTokenCounter>(
     tokenizer: &C,
     sections: &[String; 7],
-) -> Result<[u32; 7], CompactTaskCompletionProjectorError> {
+) -> Result<([u32; 7], u32), CompactTaskCompletionProjectorError> {
     let mut counts = [0_u32; 7];
-    let mut cumulative = String::new();
-    let mut previous = 0_u32;
     for (index, section) in sections.iter().enumerate() {
-        cumulative.push_str(section);
-        let current = count(tokenizer, &cumulative)?;
-        counts[index] = current.saturating_sub(previous);
-        previous = current;
+        counts[index] = count(tokenizer, section)?;
     }
-    Ok(counts)
+    let projected_tokens = count(tokenizer, &sections.concat())?;
+    reconcile_section_counts(&mut counts, projected_tokens);
+    Ok((counts, projected_tokens))
+}
+
+fn reconcile_section_counts(counts: &mut [u32; 7], projected_tokens: u32) {
+    let total = counts.iter().map(|value| u64::from(*value)).sum::<u64>();
+    let target = u64::from(projected_tokens);
+    if total < target {
+        counts[6] += u32::try_from(target - total).unwrap_or(u32::MAX);
+        return;
+    }
+
+    let mut excess = total - target;
+    for count in counts.iter_mut().rev() {
+        let reduction = u64::from(*count).min(excess);
+        *count -= u32::try_from(reduction).unwrap_or(*count);
+        excess -= reduction;
+        if excess == 0 {
+            break;
+        }
+    }
 }
 
 fn count<C: TaskCompletionTokenCounter>(
@@ -781,6 +819,23 @@ mod tests {
 
         fn count_tokens(&self, text: &str) -> Result<u32, String> {
             Ok(u32::try_from(text.split_whitespace().count()).unwrap_or(u32::MAX))
+        }
+    }
+
+    struct BoundaryMergeCounter;
+
+    impl TaskCompletionTokenCounter for BoundaryMergeCounter {
+        fn tokenizer_id(&self) -> &str {
+            "test-boundary-merge-counter.v1"
+        }
+
+        fn count_tokens(&self, text: &str) -> Result<u32, String> {
+            let words = u32::try_from(text.split_whitespace().count()).unwrap_or(u32::MAX);
+            Ok(if text.contains("</rubric>\n<goal>") {
+                words.saturating_sub(7)
+            } else {
+                words
+            })
         }
     }
 
@@ -858,7 +913,42 @@ mod tests {
                 .entries
                 .contains_key(&fact.evidence_key)
         }));
+        assert_eq!(
+            projection
+                .facts
+                .iter()
+                .map(|fact| fact.sequence)
+                .collect::<Vec<_>>(),
+            (0..u32::try_from(projection.facts.len()).unwrap()).collect::<Vec<_>>()
+        );
         assert!(projection.token_budget.projected_tokens <= 6_144);
+    }
+
+    #[test]
+    fn full_prompt_count_is_authoritative_across_tokenizer_boundaries() {
+        let source = source_projection();
+        let projector = CompactTaskCompletionProjector::default();
+        let projection = projector
+            .project(
+                &source,
+                CompactTaskCompletionVariantV1::Complete,
+                &BoundaryMergeCounter,
+            )
+            .unwrap();
+        let prompt = projector.render_prompt(&projection);
+        let direct_count = BoundaryMergeCounter.count_tokens(&prompt).unwrap();
+        let budget = &projection.token_budget;
+        let section_sum = budget.rubric_tokens
+            + budget.goal_tokens
+            + budget.final_response_tokens
+            + budget.mandatory_tokens
+            + budget.recovery_tokens
+            + budget.goal_relevant_tokens
+            + budget.metadata_tokens;
+
+        assert_eq!(budget.projected_tokens, direct_count);
+        assert_eq!(section_sum, direct_count);
+        projection.validate().unwrap();
     }
 
     #[test]
