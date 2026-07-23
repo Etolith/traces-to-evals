@@ -72,7 +72,8 @@ pub use task_completion_training::{
     FEATURE_NAMES as TASK_COMPLETION_STRUCTURED_FEATURE_NAMES,
     TASK_COMPLETION_EVIDENCE_FEATURE_RECORD_SCHEMA_VERSION,
     TASK_COMPLETION_STRUCTURED_FEATURE_SET_VERSION, TASK_COMPLETION_TRAINING_RECORD_SCHEMA_VERSION,
-    TaskCompletionEvidenceFeatureRecordV1, TaskCompletionTrainingRecordV1,
+    TaskCompletionEvidenceFeatureRecordV1, TaskCompletionStructuredEvidenceFeaturesV2,
+    TaskCompletionTrainingRecordV1,
 };
 pub use taxonomy::{
     AGENT_TAXONOMY_RELEASE_SCHEMA_VERSION, AgentTaxonomyReleaseV1, TaxonomyAssignmentSourceV1,
