@@ -150,10 +150,9 @@ pub fn resolved_span_kind(span: &Span) -> SpanKind {
 /// privacy policy must still decide whether a known key and its value may be
 /// released to analysis.
 pub fn is_known_semantic_attribute_key(key: &str) -> bool {
-    KNOWN_SEMANTIC_ATTRIBUTE_KEYS.contains(&key)
-        || KNOWN_SEMANTIC_ATTRIBUTE_KEYS
-            .iter()
-            .any(|candidate| key.eq_ignore_ascii_case(candidate))
+    KNOWN_SEMANTIC_ATTRIBUTE_KEYS
+        .iter()
+        .any(|candidate| key == *candidate || key.eq_ignore_ascii_case(candidate))
 }
 
 #[cfg(test)]
