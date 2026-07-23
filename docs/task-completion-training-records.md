@@ -23,6 +23,10 @@ The structured features describe evidence availability and execution shape. They
 do not decide whether the task succeeded. A learned evaluator remains
 responsible for that decision.
 
+The typed v2 structure is the construction API; the serialized training record
+stores its deterministic names and values in the versioned feature record
+rather than embedding a second nested typed object.
+
 Feature-set v2 defines goal relevance as membership in the explicit
 `GoalRelevant` evidence lane. A failed fact counts as recovered only when a
 later successful fact appears in the same recovery chain. These definitions are
