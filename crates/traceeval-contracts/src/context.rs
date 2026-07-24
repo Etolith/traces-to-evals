@@ -704,15 +704,17 @@ fn contains_forbidden_scalar(value: &str) -> bool {
                     .collect::<String>(),
             )
     }) || contains_credential_assignment(value)
-        || contains_secret_prefix(value, "sk-")
-        || contains_secret_prefix(value, "ghp_")
-        || contains_secret_prefix(value, "github_pat_")
-        || contains_secret_prefix(value, "xoxb-")
-        || contains_secret_prefix(value, "xoxp-")
+        || contains_secret_prefixed_token(value)
         || value.to_ascii_lowercase().contains("bearer ")
         || value.contains("BEGIN PRIVATE KEY")
         || value.contains("BEGIN OPENSSH PRIVATE KEY")
         || decoded_value_is_forbidden(value)
+}
+
+fn contains_secret_prefixed_token(value: &str) -> bool {
+    ["sk-", "ghp_", "github_pat_", "xoxb-", "xoxp-"]
+        .iter()
+        .any(|prefix| contains_secret_prefix(value, prefix))
 }
 
 fn contains_secret_prefix(value: &str, prefix: &str) -> bool {
@@ -790,9 +792,7 @@ fn decoded_value_is_forbidden(value: &str) -> bool {
                         .collect::<String>(),
                 )
         }) || contains_credential_assignment(&decoded)
-            || contains_secret_prefix(&decoded, "sk-")
-            || contains_secret_prefix(&decoded, "ghp_")
-            || contains_secret_prefix(&decoded, "github_pat_")
+            || contains_secret_prefixed_token(&decoded)
             || decoded.to_ascii_lowercase().contains("bearer ")
             || decoded.contains("PRIVATE KEY")
     })
@@ -827,5 +827,12 @@ mod tests {
             "Perseval task-completion safety default"
         ));
         assert!(contains_forbidden_scalar("credential: sk-abcdefgh12345678"));
+    }
+
+    #[test]
+    fn secret_prefix_requires_a_token_boundary_and_long_enough_suffix() {
+        assert!(!contains_secret_prefix("sk-short", "sk-"));
+        assert!(!contains_secret_prefix("prefixsk-abcdefgh12345678", "sk-"));
+        assert!(contains_secret_prefix("prefix sk-abcdefgh12345678", "sk-"));
     }
 }
