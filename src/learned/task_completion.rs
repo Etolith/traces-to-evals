@@ -653,7 +653,7 @@ fn validate_projected_summary(
 
 fn validate_structured_facts(facts: &BTreeMap<String, Value>) -> Result<(), ContractError> {
     for (key, value) in facts {
-        if !is_task_completion_fact_key(key) || !is_bounded_fact_value(value) {
+        if !is_task_completion_fact_key(key) || !is_task_completion_fact_value(key, value) {
             return Err(task_error(format!(
                 "unsupported or unbounded task-completion fact {key}"
             )));
@@ -669,8 +669,9 @@ fn task_completion_structured_facts(
         .iter()
         .filter_map(|(key, value)| {
             let normalized = key.to_ascii_lowercase();
-            (is_task_completion_fact_key(&normalized) && is_bounded_fact_value(value))
-                .then(|| (normalized, value.clone()))
+            (is_task_completion_fact_key(&normalized)
+                && is_task_completion_fact_value(&normalized, value))
+            .then(|| (normalized, value.clone()))
         })
         .collect()
 }
@@ -727,6 +728,13 @@ fn is_task_completion_fact_key(key: &str) -> bool {
             | "result.ok"
             | "policy.outcome"
             | "guardrail.outcome"
+            | "perseval.evidence.proof.id"
+            | "perseval.evidence.proof.kind"
+            | "perseval.evidence.proof.artifact_sha256"
+            | "perseval.evidence.proof.producer_kind"
+            | "perseval.evidence.proof.producer_identity"
+            | "perseval.evidence.proof.producer_version"
+            | "perseval.requirement.ids"
     )
 }
 
@@ -736,6 +744,27 @@ fn is_bounded_fact_value(value: &Value) -> bool {
         Value::String(value) => value.chars().count() <= 256,
         Value::Array(_) | Value::Object(_) => false,
     }
+}
+
+fn is_task_completion_fact_value(key: &str, fact_value: &Value) -> bool {
+    if key == "perseval.requirement.ids" {
+        return match fact_value {
+            Value::Array(requirement_ids)
+                if !requirement_ids.is_empty() && requirement_ids.len() <= 64 =>
+            {
+                requirement_ids.iter().all(|entry| {
+                    matches!(
+                        entry,
+                        Value::String(requirement_id)
+                            if !requirement_id.trim().is_empty()
+                                && requirement_id.chars().count() <= 200
+                    )
+                })
+            }
+            _ => false,
+        };
+    }
+    is_bounded_fact_value(fact_value)
 }
 
 fn is_false(value: &bool) -> bool {
@@ -1966,6 +1995,78 @@ mod tests {
         assert!(first.evidence_catalog.entries.contains_key("tool-span:0"));
         assert!(first.evidence_catalog.entries.contains_key("tool-input:0"));
         assert!(first.evidence_catalog.entries.contains_key("tool-output:0"));
+    }
+
+    #[test]
+    fn verifier_receipt_facts_survive_the_production_projection() {
+        let context = context();
+        let binding = binding(&context);
+        let context_projection = context_projection(&context);
+        let mut proof_trace = trace();
+        let tool = proof_trace
+            .spans
+            .iter_mut()
+            .find(|span| span.id == "tool-1")
+            .unwrap();
+        let proof_facts = BTreeMap::from([
+            (
+                "perseval.evidence.proof.id".to_string(),
+                json!("proof-check-1"),
+            ),
+            (
+                "perseval.evidence.proof.kind".to_string(),
+                json!("coding_verification"),
+            ),
+            (
+                "perseval.evidence.proof.artifact_sha256".to_string(),
+                json!(digest('c')),
+            ),
+            (
+                "perseval.evidence.proof.producer_kind".to_string(),
+                json!("source_native_verifier"),
+            ),
+            (
+                "perseval.evidence.proof.producer_identity".to_string(),
+                json!("pytest"),
+            ),
+            (
+                "perseval.evidence.proof.producer_version".to_string(),
+                json!("v1"),
+            ),
+            (
+                "perseval.requirement.ids".to_string(),
+                json!(["criterion-1"]),
+            ),
+        ]);
+        tool.attributes.extend(proof_facts.clone());
+
+        let projection = TaskCompletionProjectorV1 {
+            content_policy: TaskCompletionContentPolicyV1::PreRedactedSummaries,
+            ..Default::default()
+        }
+        .project(
+            "trace-1",
+            "rev-1",
+            &binding,
+            Some(&context),
+            Some(&context_projection),
+            &proof_trace,
+        )
+        .unwrap();
+        let facts = &projection.tools[0].structured_facts;
+
+        for (key, expected) in &proof_facts {
+            assert_eq!(facts.get(key), Some(expected));
+        }
+        assert_eq!(
+            facts.get("agent.state.observation"),
+            Some(&json!("verified_changed"))
+        );
+        assert_eq!(facts.len(), proof_facts.len() + 1);
+        assert!(!is_task_completion_fact_value(
+            "tool.status",
+            &json!(["arbitrary", "array"])
+        ));
     }
 
     #[test]
