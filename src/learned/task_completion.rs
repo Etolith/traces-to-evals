@@ -653,7 +653,7 @@ fn validate_projected_summary(
 
 fn validate_structured_facts(facts: &BTreeMap<String, Value>) -> Result<(), ContractError> {
     for (key, value) in facts {
-        if !is_task_completion_fact_key(key) || !is_bounded_fact_value(value) {
+        if !is_task_completion_fact_key(key) || !is_bounded_fact_value(key, value) {
             return Err(task_error(format!(
                 "unsupported or unbounded task-completion fact {key}"
             )));
@@ -669,7 +669,7 @@ fn task_completion_structured_facts(
         .iter()
         .filter_map(|(key, value)| {
             let normalized = key.to_ascii_lowercase();
-            (is_task_completion_fact_key(&normalized) && is_bounded_fact_value(value))
+            (is_task_completion_fact_key(&normalized) && is_bounded_fact_value(&normalized, value))
                 .then(|| (normalized, value.clone()))
         })
         .collect()
@@ -727,10 +727,29 @@ fn is_task_completion_fact_key(key: &str) -> bool {
             | "result.ok"
             | "policy.outcome"
             | "guardrail.outcome"
+            | "perseval.evidence.proof.id"
+            | "perseval.evidence.proof.kind"
+            | "perseval.evidence.proof.artifact_sha256"
+            | "perseval.evidence.proof.producer_kind"
+            | "perseval.evidence.proof.producer_identity"
+            | "perseval.evidence.proof.producer_version"
+            | "perseval.requirement.ids"
     )
 }
 
-fn is_bounded_fact_value(value: &Value) -> bool {
+fn is_bounded_fact_value(key: &str, value: &Value) -> bool {
+    if key == "perseval.requirement.ids" {
+        let Value::Array(values) = value else {
+            return false;
+        };
+        return !values.is_empty()
+            && values.len() <= 32
+            && values.iter().all(|value| {
+                value
+                    .as_str()
+                    .is_some_and(|value| !value.trim().is_empty() && value.chars().count() <= 128)
+            });
+    }
     match value {
         Value::Null | Value::Bool(_) | Value::Number(_) => true,
         Value::String(value) => value.chars().count() <= 256,
@@ -1966,6 +1985,101 @@ mod tests {
         assert!(first.evidence_catalog.entries.contains_key("tool-span:0"));
         assert!(first.evidence_catalog.entries.contains_key("tool-input:0"));
         assert!(first.evidence_catalog.entries.contains_key("tool-output:0"));
+    }
+
+    #[test]
+    fn versioned_proof_metadata_survives_task_and_compact_projection() {
+        let context = context();
+        let binding = binding(&context);
+        let context_projection = context_projection(&context);
+        let mut source_trace = trace();
+        let tool = source_trace
+            .spans
+            .iter_mut()
+            .find(|span| span.id == "tool-1")
+            .unwrap();
+        for (key, value) in [
+            ("perseval.evidence.proof.id", json!("proof-final")),
+            ("perseval.evidence.proof.kind", json!("browser_final_state")),
+            (
+                "perseval.evidence.proof.artifact_sha256",
+                json!(digest('b')),
+            ),
+            (
+                "perseval.evidence.proof.producer_kind",
+                json!("source_native_verifier"),
+            ),
+            (
+                "perseval.evidence.proof.producer_identity",
+                json!("matm.webarena.environment_outcome"),
+            ),
+            (
+                "perseval.evidence.proof.producer_version",
+                json!("matm-source-native-terminal-proof-v1"),
+            ),
+            ("perseval.requirement.ids", json!(["R-terminal-goal"])),
+        ] {
+            tool.attributes.insert(key.into(), value);
+        }
+        tool.attributes
+            .insert("benchmark.gold.label".into(), json!("must-not-propagate"));
+
+        let projection = TaskCompletionProjectorV1 {
+            content_policy: TaskCompletionContentPolicyV1::PreRedactedSummaries,
+            ..Default::default()
+        }
+        .project(
+            "trace-1",
+            "rev-1",
+            &binding,
+            Some(&context),
+            Some(&context_projection),
+            &source_trace,
+        )
+        .unwrap();
+        let facts = &projection.tools[0].structured_facts;
+
+        assert_eq!(
+            facts.get("perseval.evidence.proof.id"),
+            Some(&json!("proof-final"))
+        );
+        assert_eq!(
+            facts.get("perseval.requirement.ids"),
+            Some(&json!(["R-terminal-goal"]))
+        );
+        assert!(!facts.contains_key("benchmark.gold.label"));
+
+        struct TestTokenCounter;
+        impl super::super::TaskCompletionTokenCounter for TestTokenCounter {
+            fn tokenizer_id(&self) -> &str {
+                "proof-contract-test-tokenizer.v1"
+            }
+
+            fn count_tokens(&self, text: &str) -> Result<u32, String> {
+                Ok(u32::try_from(text.split_whitespace().count()).unwrap_or(u32::MAX))
+            }
+        }
+        let compact = super::super::CompactTaskCompletionProjector::default()
+            .project(
+                &projection,
+                super::super::CompactTaskCompletionVariantV1::Complete,
+                &TestTokenCounter,
+            )
+            .unwrap();
+        let proof_fact = compact
+            .facts
+            .iter()
+            .find(|fact| {
+                fact.structured_facts
+                    .contains_key("perseval.evidence.proof.id")
+            })
+            .unwrap();
+        assert_eq!(
+            proof_fact
+                .structured_facts
+                .get("perseval.evidence.proof.id"),
+            Some(&json!("proof-final"))
+        );
     }
 
     #[test]
