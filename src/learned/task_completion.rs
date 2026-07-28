@@ -28,6 +28,10 @@ const TASK_COMPLETION_PROJECTOR_VERSION_V1: &str = "traceeval.task-completion-pr
 const TASK_COMPLETION_PROJECTOR_VERSION_V2: &str = "traceeval.task-completion-projector.v2";
 const TASK_COMPLETION_PROJECTION_HASH_DOMAIN: &str = "traceeval.task-completion-projection.v1";
 
+fn legacy_task_completion_projector_version() -> String {
+    TASK_COMPLETION_PROJECTOR_VERSION_V2.into()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskCompletionContentPolicyV1 {
@@ -348,6 +352,7 @@ impl TaskCompletionProjectionV1 {
 
     pub fn projector_release_id(&self) -> Result<String, ContractError> {
         TaskCompletionProjectorV1 {
+            projector_version: self.projector_version.clone(),
             content_policy: self.content_policy,
             max_tool_observations: self.max_tool_observations,
             max_summary_bytes: self.max_summary_bytes,
@@ -851,6 +856,8 @@ fn project_span_summary(
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskCompletionProjectorV1 {
+    #[serde(default = "legacy_task_completion_projector_version")]
+    pub projector_version: String,
     pub content_policy: TaskCompletionContentPolicyV1,
     pub max_tool_observations: u32,
     pub max_summary_bytes: u32,
@@ -859,6 +866,7 @@ pub struct TaskCompletionProjectorV1 {
 impl Default for TaskCompletionProjectorV1 {
     fn default() -> Self {
         Self {
+            projector_version: TASK_COMPLETION_PROJECTOR_VERSION.into(),
             content_policy: TaskCompletionContentPolicyV1::StructuredOnly,
             max_tool_observations: 256,
             max_summary_bytes: 4_096,
@@ -868,12 +876,20 @@ impl Default for TaskCompletionProjectorV1 {
 
 impl TaskCompletionProjectorV1 {
     pub fn release_id(&self) -> Result<String, ContractError> {
-        self.release_id_for_version(TASK_COMPLETION_PROJECTOR_VERSION)
+        self.release_id_for_version(&self.projector_version)
     }
 
     fn release_id_for_version(&self, projector_version: &str) -> Result<String, ContractError> {
         if self.max_tool_observations == 0 || self.max_summary_bytes == 0 {
             return Err(task_error("projector bounds must be greater than zero"));
+        }
+        if !matches!(
+            self.projector_version.as_str(),
+            TASK_COMPLETION_PROJECTOR_VERSION
+                | TASK_COMPLETION_PROJECTOR_VERSION_V2
+                | TASK_COMPLETION_PROJECTOR_VERSION_V1
+        ) {
+            return Err(task_error("unsupported task-completion projector version"));
         }
         let identity = match projector_version {
             TASK_COMPLETION_PROJECTOR_VERSION_V1 => serde_json::json!({
@@ -1186,7 +1202,11 @@ impl TaskCompletionProjectorV1 {
         let all_observation_spans = spans
             .iter()
             .copied()
-            .filter(|span| is_tool_span(span) || has_proof_receipt(span))
+            .filter(|span| {
+                is_tool_span(span)
+                    || (self.projector_version == TASK_COMPLETION_PROJECTOR_VERSION
+                        && has_proof_receipt(span))
+            })
             .collect::<Vec<_>>();
         truncated |= all_observation_spans.len() > self.max_tool_observations as usize;
         let mut tools = Vec::new();
@@ -1252,7 +1272,7 @@ impl TaskCompletionProjectorV1 {
         let placeholder = "sha256:0000000000000000000000000000000000000000000000000000000000000000";
         let mut projection = TaskCompletionProjectionV1 {
             schema_version: TASK_COMPLETION_PROJECTION_SCHEMA_VERSION.into(),
-            projector_version: TASK_COMPLETION_PROJECTOR_VERSION.into(),
+            projector_version: self.projector_version.clone(),
             content_policy: self.content_policy,
             max_tool_observations: self.max_tool_observations,
             max_summary_bytes: self.max_summary_bytes,
@@ -2148,6 +2168,53 @@ mod tests {
         assert_eq!(
             verifier.output_summary.as_deref(),
             Some("The requested state is visible.")
+        );
+    }
+
+    #[test]
+    fn persisted_projectors_without_a_version_keep_v2_behavior() {
+        let projector: TaskCompletionProjectorV1 = serde_json::from_value(json!({
+            "content_policy": "pre_redacted_summaries",
+            "max_tool_observations": 256,
+            "max_summary_bytes": 4096
+        }))
+        .unwrap();
+        assert_eq!(
+            projector.projector_version,
+            TASK_COMPLETION_PROJECTOR_VERSION_V2
+        );
+
+        let context = context();
+        let binding = binding(&context);
+        let context_projection = context_projection(&context);
+        let mut source_trace = trace();
+        let mut verifier =
+            Span::new("verifier-1", "post_action_verifier").with_kind(SpanKind::Evaluator);
+        verifier.attributes.insert(
+            "perseval.evidence.proof.id".into(),
+            json!("proof-verifier-1"),
+        );
+        source_trace.spans.push(verifier);
+
+        let projection = projector
+            .project(
+                "trace-1",
+                "rev-1",
+                &binding,
+                Some(&context),
+                Some(&context_projection),
+                &source_trace,
+            )
+            .unwrap();
+        assert_eq!(
+            projection.projector_version,
+            TASK_COMPLETION_PROJECTOR_VERSION_V2
+        );
+        assert!(
+            projection
+                .tools
+                .iter()
+                .all(|observation| observation.span_id != "verifier-1")
         );
     }
 
