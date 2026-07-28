@@ -123,6 +123,12 @@ const KNOWN_SEMANTIC_ATTRIBUTE_KEYS: &[&str] = &[
     "guardrail.outcome",
     "decision_id",
     "reason_code",
+    "perseval.evidence.proof.id",
+    "perseval.evidence.proof.kind",
+    "perseval.evidence.proof.artifact_sha256",
+    "perseval.evidence.proof.producer_kind",
+    "perseval.evidence.proof.producer_identity",
+    "perseval.evidence.proof.producer_version",
 ];
 
 /// Maps OpenInference values and persisted category aliases onto the portable
@@ -173,6 +179,12 @@ mod tests {
         assert!(is_known_semantic_attribute_key("approval_required"));
         assert!(is_known_semantic_attribute_key("approval.outcome"));
         assert!(is_known_semantic_attribute_key("tool_name"));
+        assert!(is_known_semantic_attribute_key(
+            "perseval.evidence.proof.id"
+        ));
+        assert!(is_known_semantic_attribute_key(
+            "perseval.evidence.proof.artifact_sha256"
+        ));
         assert!(is_known_semantic_attribute_key("TOOL.RESULT.SUCCESS"));
         assert!(!is_known_semantic_attribute_key("input.value"));
         assert!(!is_known_semantic_attribute_key("output.value"));
