@@ -884,7 +884,7 @@ impl TaskCompletionProjectorV1 {
             return Err(task_error("projector bounds must be greater than zero"));
         }
         if !matches!(
-            self.projector_version.as_str(),
+            projector_version,
             TASK_COMPLETION_PROJECTOR_VERSION
                 | TASK_COMPLETION_PROJECTOR_VERSION_V2
                 | TASK_COMPLETION_PROJECTOR_VERSION_V1
@@ -1199,22 +1199,33 @@ impl TaskCompletionProjectorV1 {
             .filter(|span| is_tool_span(span))
             .collect::<Vec<_>>();
         trace_observation.tool_span_count = u32::try_from(all_tool_spans.len()).unwrap_or(u32::MAX);
-        let all_observation_spans = spans
+        let non_tool_proof_spans = spans
             .iter()
             .copied()
-            .filter(|span| {
-                is_tool_span(span)
-                    || (self.projector_version == TASK_COMPLETION_PROJECTOR_VERSION
-                        && has_proof_receipt(span))
-            })
+            .filter(|span| !is_tool_span(span) && has_proof_receipt(span))
             .collect::<Vec<_>>();
-        truncated |= all_observation_spans.len() > self.max_tool_observations as usize;
+        let observation_limit = self.max_tool_observations as usize;
+        let observation_count = all_tool_spans.len()
+            + if self.projector_version == TASK_COMPLETION_PROJECTOR_VERSION {
+                non_tool_proof_spans.len()
+            } else {
+                0
+            };
+        truncated |= observation_count > observation_limit;
+        let mut selected_observation_spans = all_tool_spans
+            .iter()
+            .copied()
+            .take(observation_limit)
+            .collect::<Vec<_>>();
+        if self.projector_version == TASK_COMPLETION_PROJECTOR_VERSION {
+            let remaining = observation_limit.saturating_sub(selected_observation_spans.len());
+            selected_observation_spans.extend(non_tool_proof_spans.into_iter().take(remaining));
+            selected_observation_spans.sort_by(|left, right| {
+                (left.start_time_unix_nano, &left.id).cmp(&(right.start_time_unix_nano, &right.id))
+            });
+        }
         let mut tools = Vec::new();
-        for (index, span) in all_observation_spans
-            .into_iter()
-            .take(self.max_tool_observations as usize)
-            .enumerate()
-        {
+        for (index, span) in selected_observation_spans.into_iter().enumerate() {
             let evidence_identity = index.to_string();
             let key = evidence_key("tool-span", &evidence_identity);
             pending_records.insert(
@@ -2169,6 +2180,43 @@ mod tests {
             verifier.output_summary.as_deref(),
             Some("The requested state is visible.")
         );
+    }
+
+    #[test]
+    fn non_tool_verifier_receipt_does_not_displace_a_bounded_tool_observation() {
+        let context = context();
+        let binding = binding(&context);
+        let context_projection = context_projection(&context);
+        let mut source_trace = trace();
+        let mut verifier =
+            Span::new("verifier-1", "post_action_verifier").with_kind(SpanKind::Evaluator);
+        verifier.parent_id = Some("root".into());
+        verifier.start_time_unix_nano = Some(1);
+        verifier.source_status = SourceSpanStatus::Ok;
+        verifier.attributes.insert(
+            "perseval.evidence.proof.id".into(),
+            json!("proof-verifier-1"),
+        );
+        source_trace.spans.push(verifier);
+
+        let projection = TaskCompletionProjectorV1 {
+            content_policy: TaskCompletionContentPolicyV1::PreRedactedSummaries,
+            max_tool_observations: 1,
+            ..Default::default()
+        }
+        .project(
+            "trace-1",
+            "rev-1",
+            &binding,
+            Some(&context),
+            Some(&context_projection),
+            &source_trace,
+        )
+        .unwrap();
+
+        assert!(projection.truncated);
+        assert_eq!(projection.tools.len(), 1);
+        assert_eq!(projection.tools[0].span_id, "tool-1");
     }
 
     #[test]
