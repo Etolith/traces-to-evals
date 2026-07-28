@@ -22,9 +22,10 @@ use super::{
 pub const TASK_COMPLETION_PROJECTION_SCHEMA_VERSION: &str =
     "traceeval.task_completion_projection.v1";
 pub const TASK_COMPLETION_JUDGMENT_SCHEMA_VERSION: &str = "traceeval.task_completion_judgment.v1";
-pub const TASK_COMPLETION_PROJECTOR_VERSION: &str = "traceeval.task-completion-projector.v2";
+pub const TASK_COMPLETION_PROJECTOR_VERSION: &str = "traceeval.task-completion-projector.v3";
 pub const TASK_COMPLETION_EVIDENCE_SYSTEM_PROMPT_V2: &str = "Judge task completion only from the declared success criteria and cited observed trace evidence. An individual tool status establishes only that call's execution; a submit tool, terminal status, agent success claim, deterministic finding, or missing evidence is never proof that the user's task succeeded. Completed requires direct evidence relevant to every must criterion and verification after the last material mutation. Edits or actions without relevant verification are partial, not completed. Explicit failed verification or unrecovered errors make the task failed unless later evidence demonstrates recovery. When truncation or omission hides material outcome evidence, abstain instead of guessing.";
 const TASK_COMPLETION_PROJECTOR_VERSION_V1: &str = "traceeval.task-completion-projector.v1";
+const TASK_COMPLETION_PROJECTOR_VERSION_V2: &str = "traceeval.task-completion-projector.v2";
 const TASK_COMPLETION_PROJECTION_HASH_DOMAIN: &str = "traceeval.task-completion-projection.v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -178,7 +179,9 @@ impl TaskCompletionProjectionV1 {
         }
         if !matches!(
             self.projector_version.as_str(),
-            TASK_COMPLETION_PROJECTOR_VERSION | TASK_COMPLETION_PROJECTOR_VERSION_V1
+            TASK_COMPLETION_PROJECTOR_VERSION
+                | TASK_COMPLETION_PROJECTOR_VERSION_V2
+                | TASK_COMPLETION_PROJECTOR_VERSION_V1
         ) {
             return Err(task_error("unsupported task-completion projector version"));
         }
@@ -881,6 +884,20 @@ impl TaskCompletionProjectorV1 {
                 "truncation_policy": "abstain_on_material_truncation",
                 "ordering": "start_time_unix_nano_then_span_id",
             }),
+            TASK_COMPLETION_PROJECTOR_VERSION_V2 => serde_json::json!({
+                "projector_version": TASK_COMPLETION_PROJECTOR_VERSION_V2,
+                "content_policy": self.content_policy,
+                "max_tool_observations": self.max_tool_observations,
+                "max_summary_bytes": self.max_summary_bytes,
+                "truncation_policy": "abstain_on_material_truncation",
+                "ordering": "start_time_unix_nano_then_span_id",
+                "structured_fact_policy": "task_completion_allowlist_v1",
+                "authorized_tool_content": "bounded_input_output_segments_v1",
+                "content_truncation_policy": "field_level_flags_and_material_abstention_v1",
+                "tool_summary_bytes": "min(max_summary_bytes,1024)",
+                "terminal_tool_trajectory_policy": "omit_when_native_children_are_present_v1",
+                "evidence_key_policy": "projection_local_positional_aliases_v1",
+            }),
             TASK_COMPLETION_PROJECTOR_VERSION => serde_json::json!({
                 "projector_version": TASK_COMPLETION_PROJECTOR_VERSION,
                 "content_policy": self.content_policy,
@@ -894,6 +911,7 @@ impl TaskCompletionProjectorV1 {
                 "tool_summary_bytes": "min(max_summary_bytes,1024)",
                 "terminal_tool_trajectory_policy": "omit_when_native_children_are_present_v1",
                 "evidence_key_policy": "projection_local_positional_aliases_v1",
+                "proof_receipt_span_policy": "include_non_tool_proof_receipts_v1",
             }),
             _ => return Err(task_error("unsupported task-completion projector version")),
         };
@@ -1165,9 +1183,14 @@ impl TaskCompletionProjectorV1 {
             .filter(|span| is_tool_span(span))
             .collect::<Vec<_>>();
         trace_observation.tool_span_count = u32::try_from(all_tool_spans.len()).unwrap_or(u32::MAX);
-        truncated |= all_tool_spans.len() > self.max_tool_observations as usize;
+        let all_observation_spans = spans
+            .iter()
+            .copied()
+            .filter(|span| is_tool_span(span) || has_proof_receipt(span))
+            .collect::<Vec<_>>();
+        truncated |= all_observation_spans.len() > self.max_tool_observations as usize;
         let mut tools = Vec::new();
-        for (index, span) in all_tool_spans
+        for (index, span) in all_observation_spans
             .into_iter()
             .take(self.max_tool_observations as usize)
             .enumerate()
@@ -1595,6 +1618,12 @@ fn project_capability(capability: &AgentCapabilityV1) -> TaskCompletionCapabilit
 
 fn is_tool_span(span: &Span) -> bool {
     crate::resolved_span_kind(span) == SpanKind::Tool
+}
+
+fn has_proof_receipt(span: &Span) -> bool {
+    span.attributes
+        .get("perseval.evidence.proof.id")
+        .is_some_and(|value| value.as_str().is_some_and(|value| !value.trim().is_empty()))
 }
 
 fn bound_utf8(value: &str, max_bytes: u32) -> String {
@@ -2067,6 +2096,59 @@ mod tests {
             "tool.status",
             &json!(["arbitrary", "array"])
         ));
+    }
+
+    #[test]
+    fn non_tool_verifier_receipt_is_preserved_as_an_observation() {
+        let context = context();
+        let binding = binding(&context);
+        let context_projection = context_projection(&context);
+        let mut source_trace = trace();
+        let mut verifier =
+            Span::new("verifier-1", "post_action_verifier").with_kind(SpanKind::Evaluator);
+        verifier.parent_id = Some("root".into());
+        verifier.start_time_unix_nano = Some(4);
+        verifier.end_time_unix_nano = Some(5);
+        verifier.source_status = SourceSpanStatus::Ok;
+        verifier.output = Some("The requested state is visible.".into());
+        verifier.attributes.insert(
+            "perseval.evidence.proof.id".into(),
+            json!("proof-verifier-1"),
+        );
+        verifier.attributes.insert(
+            "perseval.evidence.proof.kind".into(),
+            json!("post_action_state_verification"),
+        );
+        source_trace.spans.push(verifier);
+
+        let projection = TaskCompletionProjectorV1 {
+            content_policy: TaskCompletionContentPolicyV1::PreRedactedSummaries,
+            ..Default::default()
+        }
+        .project(
+            "trace-1",
+            "rev-1",
+            &binding,
+            Some(&context),
+            Some(&context_projection),
+            &source_trace,
+        )
+        .unwrap();
+
+        assert_eq!(projection.trace.tool_span_count, 1);
+        let verifier = projection
+            .tools
+            .iter()
+            .find(|observation| observation.span_id == "verifier-1")
+            .unwrap();
+        assert_eq!(
+            verifier.structured_facts.get("perseval.evidence.proof.id"),
+            Some(&json!("proof-verifier-1"))
+        );
+        assert_eq!(
+            verifier.output_summary.as_deref(),
+            Some("The requested state is visible.")
+        );
     }
 
     #[test]
